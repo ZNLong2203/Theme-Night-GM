@@ -18,18 +18,33 @@ const TOOL_TITLES: Record<string, string> = {
 };
 
 export function AgentTrace({ timeline, requests, running }: { timeline: TimelineItem[]; requests: QlooRequestLog[]; running: boolean }) {
-  const end = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLOListElement>(null);
+  const stick = useRef(true);
   const [open, setOpen] = useState<string | null>(null);
 
+  // The trace sits directly inside its scroll box. Follow new steps by scrolling that box only — never the
+  // page — and stop following while the reader has scrolled up to look at an earlier step.
   useEffect(() => {
-    end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [timeline.length]);
+    const box = list.current?.parentElement;
+    if (!box) return;
+    const onScroll = () => {
+      stick.current = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
+    };
+    box.addEventListener("scroll", onScroll, { passive: true });
+    return () => box.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const box = list.current?.parentElement;
+    if (!timeline.length) stick.current = true;
+    if (running && box && stick.current) box.scrollTo({ top: box.scrollHeight });
+  }, [running, timeline.length]);
 
   const byCall = new Map<string, QlooRequestLog[]>();
   for (const r of requests) if (r.callId) byCall.set(r.callId, [...(byCall.get(r.callId) ?? []), r]);
 
   return (
-    <ol className="relative space-y-2.5">
+    <ol ref={list} className="relative space-y-2.5">
       {timeline.map((item) => {
         if (item.kind === "llm") {
           return (
@@ -126,7 +141,6 @@ export function AgentTrace({ timeline, requests, running }: { timeline: Timeline
           <Wrench size={13} /> The agent&apos;s steps will appear here.
         </li>
       )}
-      <div ref={end} />
     </ol>
   );
 }
