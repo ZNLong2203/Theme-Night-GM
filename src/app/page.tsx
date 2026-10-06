@@ -5,6 +5,9 @@ import { REPO_URL } from "@/lib/config";
 import { featuredPlans } from "@/lib/featured";
 import { SCORE_LABELS, SCORE_WEIGHTS } from "@/lib/scoring";
 
+// Featured plans live in the store and change after every live preset run, so render per request.
+export const dynamic = "force-dynamic";
+
 const STEPS = [
   {
     n: "01",
