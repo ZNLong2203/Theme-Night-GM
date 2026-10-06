@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { formatDate, SEGMENTS } from "@/lib/schedule";
 import type { Night, SeasonPlan } from "@/lib/types";
 import { HeatMap } from "../heat-map";
@@ -35,7 +36,7 @@ export function SeasonBoard({ plan, onPlanChange }: { plan: SeasonPlan; onPlanCh
   const revised = new Set(plan.revisions?.at(-1)?.changedDates ?? []);
 
   return (
-    <div className={cn(open && "print:hidden")}>
+    <div>
       <Card className="floodlights overflow-hidden p-5 md:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-3xl">
@@ -191,19 +192,26 @@ export function NightDetail({ night, plan, onClose }: { night: Night; plan: Seas
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
+    // While the one-pager is open, printing (button or Ctrl+P) shows only it: see .one-pager in globals.css.
+    document.body.classList.add("one-pager-open");
     return () => {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
+      document.body.classList.remove("one-pager-open");
     };
   }, [onClose]);
 
   const pitch = (s: Night["sponsors"][number]) =>
     `${night.title} (${formatDate(night.date, { weekday: "long", month: "long", day: "numeric" })}) at ${plan.team.teamName}: ${s.angle} Presenting rights include the ${night.giveaway.toLowerCase()} and in-game activations.`;
 
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm print:static print:block print:bg-transparent" onClick={onClose}>
+  // Portaled to <body> so the print rules can hide the rest of the page and keep only this sheet.
+  return createPortal(
+    <div
+      className="one-pager fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm print:static print:block print:bg-transparent print:backdrop-blur-none"
+      onClick={onClose}
+    >
       <div
-        className="scroll-thin h-full w-full max-w-5xl overflow-y-auto border-l border-line bg-surface print:max-w-none print:border-0"
+        className="scroll-thin h-full w-full max-w-5xl overflow-y-auto border-l border-line bg-surface print:h-auto print:max-w-none print:overflow-visible print:border-0"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-surface/95 px-5 py-3 backdrop-blur print:hidden">
@@ -365,7 +373,8 @@ export function NightDetail({ night, plan, onClose }: { night: Night; plan: Seas
           </Panel>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

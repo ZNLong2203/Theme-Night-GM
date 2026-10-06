@@ -85,6 +85,22 @@ body {
 }
 
 @media print {
+  /* Paper palette: the screen tokens are light-on-dark, and browsers drop backgrounds when printing. */
+  :root {
+    --bg: #fff;
+    --surface: #fff;
+    --surface-2: #f2f4f8;
+    --line: #d5dae4;
+    --line-strong: #b4bccc;
+    --text: #111;
+    --muted: #4a5163;
+    --faint: #6b7385;
+    --amber: #a35f00;
+    --turf: #0e8452;
+    --sky: #2f5fd0;
+    --rose: #c2294d;
+    --violet: #6a43c8;
+  }
   html {
     color-scheme: light;
   }
@@ -93,6 +109,13 @@ body {
     color: #111;
   }
   .no-print {
+    display: none !important;
+  }
+  /* Sponsor one-pager: with a night open, print only that sheet (NightDetail portals it into <body>). */
+  body.one-pager-open {
+    overflow: visible !important;
+  }
+  body.one-pager-open > :not(.one-pager) {
     display: none !important;
   }
 }
