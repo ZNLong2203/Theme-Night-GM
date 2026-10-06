@@ -40,12 +40,24 @@ export function isDrinkingSpot(card: Pick<EntityCard, "name" | "tags">): boolean
 /** Young crowds: nights aimed at families or under-25s, which include minors. */
 export const isYoungCrowd = (segment: string) => segment === "families" || segment === "gen_z";
 
+// Matched as framing ("Pride Night", "heritage month", "celebrate our heritage"), not as single words: a
+// tagline about "artisanal pride", a "Faith Hill Night" or a "Pride and Prejudice Night" is not one.
+const IDENTITY_NIGHT = new RegExp(
+  [
+    "\\b(?:pride|heritage|faith|religio\\w*|ethnic\\w*|cultural|nationality|immigrant)\\s+(?:night|month|day|weekend|celebration|festival|communit\\w*)\\b",
+    "\\bcelebrat\\w*\\s+(?:our\\s+|the\\s+|your\\s+|their\\s+)?(?:\\w+\\s+)?(?:heritage|culture|faith|pride|roots)\\b",
+    "\\b(?:lgbt\\w*|queer|two-spirit)",
+    "\\b(?:black|latino|latina|latinx|hispanic|asian|aapi|jewish|muslim|christian|indigenous|native american)\\s+(?:heritage|history|night|communit\\w*)\\b",
+  ].join("|"),
+  "i",
+);
+const IDENTITY_WORD =
+  /lgbt\w*|queer|two-spirit|pride|heritage|faith|religio\w*|ethnic\w*|cultur\w*|roots|nationality|immigrant|black|latin\w*|hispanic|asian|aapi|jewish|muslim|christian|indigenous|native american/i;
+
 /**
  * Identity-based nights (pride, heritage, faith...) are community partnerships a club builds with
  * those communities — not something a taste model should infer from what an audience watches.
  */
-const IDENTITY_NIGHT = /\b(pride|heritage|faith|ethnic\w*|religio\w*|nationality|immigrant|lgbt\w*)\b/i;
-
 export function identityTheme(title: string, tagline = ""): string | undefined {
-  return `${title} ${tagline}`.match(IDENTITY_NIGHT)?.[0].toLowerCase();
+  return `${title} ${tagline}`.match(IDENTITY_NIGHT)?.[0].match(IDENTITY_WORD)?.[0].toLowerCase();
 }

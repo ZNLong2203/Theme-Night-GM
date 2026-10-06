@@ -29,11 +29,16 @@ describe("identityTheme", () => {
     expect(identityTheme("Heritage Night")).toBe("heritage");
     expect(identityTheme("Fan Night", "Celebrating our faith community")).toBe("faith");
     expect(identityTheme("LGBTQ+ Night")).toBe("lgbtq");
+    expect(identityTheme("Celebrate Hispanic Heritage")).toBe("hispanic");
   });
 
   it("leaves fandom-led titles alone", () => {
     expect(identityTheme("Bull City Beats")).toBeUndefined();
     expect(identityTheme("Gamers Night", "Pixel-art player cards and a scavenger hunt")).toBeUndefined();
+    // Hometown pride, an artist named Faith, a novel title: not identity nights (a live run tripped on the first).
+    expect(identityTheme("Keep Portland Kicking Night", "Artisanal pride, eccentric spirit, and pure Portland passion.")).toBeUndefined();
+    expect(identityTheme("Faith Hill Night")).toBeUndefined();
+    expect(identityTheme("Pride and Prejudice Night")).toBeUndefined();
   });
 });
 
