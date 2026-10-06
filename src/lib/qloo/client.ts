@@ -5,8 +5,13 @@ import { kvGet, kvSet, storeKind } from "@/lib/store";
 import type { QlooRequestLog } from "@/lib/types";
 import { mockQloo } from "./mock";
 
-/** Shared cache across instances (Redis) for live responses; the kit asks us to cache only what we need. */
-const SHARED_CACHE_TTL_S = 24 * 60 * 60;
+/**
+ * Shared cache across instances (Redis) for live responses; the kit asks us to cache only what we need.
+ * Only small responses are shared: heatmaps (thousands of cells) and long entity lists filled a 30 MB
+ * free tier within a few runs and crowded out the plans people share.
+ */
+const SHARED_CACHE_TTL_S = 12 * 60 * 60;
+const SHARED_CACHE_MAX_BYTES = 64_000;
 const sharedKey = (key: string) => `qloo:v1:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
 
 const BASE_URL = process.env.QLOO_BASE_URL ?? "https://hackathon.api.qloo.com";
@@ -201,7 +206,7 @@ export async function qlooGet<T = unknown>(
   }
 
   cache.set(key, { at: Date.now(), body });
-  if (live && storeKind() === "redis") void kvSet(sharedKey(key), body, SHARED_CACHE_TTL_S);
+  if (live && storeKind() === "redis" && JSON.stringify(body).length <= SHARED_CACHE_MAX_BYTES) void kvSet(sharedKey(key), body, SHARED_CACHE_TTL_S);
   if (cache.size > 2000) cache.delete(cache.keys().next().value as string);
   recorder.push({
     id: requestId,
