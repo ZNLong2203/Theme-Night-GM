@@ -36,7 +36,7 @@ export interface ToolOutcome {
   ui?: ToolUIData;
 }
 
-interface ToolDef<A> {
+export interface ToolDef<A> {
   declaration: FunctionDeclaration;
   schema: z.ZodType<A>;
   label: (args: A) => string;
@@ -392,7 +392,9 @@ const submitTool: ToolDef<PlanSubmissionT> = {
   },
 };
 
-export const TOOLS: Record<string, ToolDef<never>> = Object.fromEntries(
+export type ToolRegistry = Record<string, ToolDef<never>>;
+
+export const TOOLS: ToolRegistry = Object.fromEntries(
   [scanMarketTool, profileTool, fitTool, sponsorTool, experienceTool, compareTool, searchTool, submitTool].map((t) => [
     t.declaration.name,
     t as unknown as ToolDef<never>,
@@ -402,8 +404,14 @@ export const TOOLS: Record<string, ToolDef<never>> = Object.fromEntries(
 export const FUNCTION_DECLARATIONS = Object.values(TOOLS).map((t) => t.declaration);
 
 /** Validate arguments, execute, and stream tool_call / tool_result events. */
-export async function runTool(name: string, rawArgs: unknown, callId: string, run: RunContext): Promise<unknown> {
-  const tool = TOOLS[name];
+export async function runTool(
+  name: string,
+  rawArgs: unknown,
+  callId: string,
+  run: RunContext,
+  registry: ToolRegistry = TOOLS,
+): Promise<unknown> {
+  const tool = registry[name];
   if (!tool) return { error: `Unknown tool ${name}` };
   const parsed = tool.schema.safeParse(rawArgs ?? {});
   if (!parsed.success) {

@@ -39,9 +39,15 @@ export const toolCallScope = new AsyncLocalStorage<string>();
 
 /** Collects every request made during one agent run so the UI can show receipts. */
 export class QlooRecorder {
-  private seq = 0;
+  private seq: number;
   readonly logs: QlooRequestLog[] = [];
-  constructor(private readonly onLog?: (log: QlooRequestLog) => void) {}
+  /** `startAt` lets a follow-up run (a revision) continue an existing plan's Q-numbering. */
+  constructor(
+    private readonly onLog?: (log: QlooRequestLog) => void,
+    startAt = 0,
+  ) {
+    this.seq = startAt;
+  }
 
   nextId() {
     this.seq += 1;

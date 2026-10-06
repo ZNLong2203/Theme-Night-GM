@@ -60,7 +60,12 @@ const initial: RunState = {
   events: [],
 };
 
-type Action = { type: "reset" } | { type: "event"; event: AgentEvent } | { type: "fail"; message: string } | { type: "load"; plan: SeasonPlan };
+type Action =
+  | { type: "reset" }
+  | { type: "event"; event: AgentEvent }
+  | { type: "fail"; message: string }
+  | { type: "load"; plan: SeasonPlan }
+  | { type: "replace_plan"; plan: SeasonPlan };
 
 function mergeBy<T>(list: T[], items: T[], key: (t: T) => string) {
   const map = new Map(list.map((t) => [key(t), t]));
@@ -93,6 +98,7 @@ function applyUi(state: RunState, ui: ToolUIData): RunState {
 function reducer(state: RunState, action: Action): RunState {
   if (action.type === "reset") return { ...initial, status: "running", startedAt: Date.now() };
   if (action.type === "fail") return { ...state, status: "error", error: action.message };
+  if (action.type === "replace_plan") return { ...state, plan: action.plan };
   if (action.type === "load") return { ...initial, status: "done", plan: action.plan, mode: action.plan.mode, requests: action.plan.requests, profiles: action.plan.profiles };
 
   const event = action.event;
@@ -201,35 +207,38 @@ export function useAgentRun() {
     if (event.type === "plan") savePlan(event.plan);
   }, []);
 
-  const start = useCallback(
-    async (team: TeamConfig) => {
+  const stream = useCallback(
+    async (url: string, body: unknown, onPlan?: (plan: SeasonPlan) => void) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
       dispatch({ type: "reset" });
       try {
-        const response = await fetch("/api/agent", {
+        const response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(team),
+          body: JSON.stringify(body),
           signal: controller.signal,
         });
         if (!response.ok || !response.body) {
-          const body = await response.json().catch(() => ({}));
-          throw new Error(Array.isArray(body.error) ? body.error.join("; ") : `Request failed (${response.status})`);
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(Array.isArray(payload.error) ? payload.error.join("; ") : `Request failed (${response.status})`);
         }
         const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
         let buffer = "";
         for (;;) {
           const { value, done } = await reader.read();
           if (done) break;
-          buffer += value;
+          buffer += value.replace(/\r\n/g, "\n");
           let index: number;
           while ((index = buffer.indexOf("\n\n")) >= 0) {
             const chunk = buffer.slice(0, index);
             buffer = buffer.slice(index + 2);
             for (const line of chunk.split("\n")) {
-              if (line.startsWith("data: ")) handle(JSON.parse(line.slice(6)) as AgentEvent);
+              if (!line.startsWith("data: ")) continue;
+              const event = JSON.parse(line.slice(6)) as AgentEvent;
+              handle(event);
+              if (event.type === "plan") onPlan?.(event.plan);
             }
           }
         }
@@ -238,6 +247,14 @@ export function useAgentRun() {
       }
     },
     [handle],
+  );
+
+  const start = useCallback((team: TeamConfig) => stream("/api/agent", team), [stream]);
+
+  /** "Ask the GM": stream a revision of an existing plan; `onPlan` receives the merged plan. */
+  const revise = useCallback(
+    (plan: SeasonPlan, message: string, onPlan: (plan: SeasonPlan) => void) => stream("/api/revise", { plan, message }, onPlan),
+    [stream],
   );
 
   /** Replay a recorded run (used for the instant demo) with realistic pacing. */
@@ -259,6 +276,10 @@ export function useAgentRun() {
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
   const load = useCallback((plan: SeasonPlan) => dispatch({ type: "load", plan }), []);
+  const setPlan = useCallback((plan: SeasonPlan) => {
+    dispatch({ type: "replace_plan", plan });
+    savePlan(plan);
+  }, []);
 
-  return { state, start, replay, stop, load };
+  return { state, start, revise, replay, stop, load, setPlan };
 }

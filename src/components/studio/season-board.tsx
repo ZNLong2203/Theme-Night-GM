@@ -23,14 +23,16 @@ import type { Night, SeasonPlan } from "@/lib/types";
 import { HeatMap } from "../heat-map";
 import { Badge, Button, Card, cn, EntityAvatar, KindBadge, ScoreRing } from "../ui";
 import { DemographicsBars, ScoreBars, TrendSpark } from "../viz";
+import { AskTheGm } from "./ask-gm";
 import { BaselineCompare } from "./baseline-compare";
 import { Receipts } from "./receipts";
 
-export function SeasonBoard({ plan }: { plan: SeasonPlan }) {
+export function SeasonBoard({ plan, onPlanChange }: { plan: SeasonPlan; onPlanChange?: (plan: SeasonPlan) => void }) {
   const [open, setOpen] = useState<Night | null>(null);
   const avg = Math.round(plan.nights.reduce((s, n) => s + n.score.total, 0) / plan.nights.length);
   const sponsors = new Set(plan.nights.flatMap((n) => n.sponsors.map((s) => s.brand.id)));
   const live = plan.requests.filter((r) => !r.cached).length;
+  const revised = new Set(plan.revisions?.at(-1)?.changedDates ?? []);
 
   return (
     <div className={cn(open && "print:hidden")}>
@@ -61,9 +63,11 @@ export function SeasonBoard({ plan }: { plan: SeasonPlan }) {
 
       <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {plan.nights.map((night) => (
-          <NightCard key={night.date} night={night} onOpen={() => setOpen(night)} />
+          <NightCard key={night.date} night={night} revised={revised.has(night.date)} onOpen={() => setOpen(night)} />
         ))}
       </div>
+
+      {onPlanChange && <AskTheGm plan={plan} onPlanChange={onPlanChange} />}
 
       <BaselineCompare key={plan.id} plan={plan} />
 
@@ -105,11 +109,11 @@ function Kpi({ label, value, suffix, hint }: { label: string; value: number; suf
 
 const RISK_TONE = { low: "turf", medium: "amber", high: "rose" } as const;
 
-function NightCard({ night, onOpen }: { night: Night; onOpen: () => void }) {
+function NightCard({ night, revised, onOpen }: { night: Night; revised?: boolean; onOpen: () => void }) {
   const seg = SEGMENTS[night.segment];
   return (
     <button onClick={onOpen} className="group text-left">
-      <Card className="flex h-full flex-col p-4 transition-colors group-hover:border-amber/50">
+      <Card className={cn("flex h-full flex-col p-4 transition-colors group-hover:border-amber/50", revised && "border-turf/50")}>
         <div className="flex items-start gap-3">
           <div className="w-14 shrink-0 rounded-lg border border-line bg-bg py-1.5 text-center">
             <div className="text-[10px] font-semibold uppercase text-amber">{night.weekday}</div>
@@ -122,6 +126,7 @@ function NightCard({ night, onOpen }: { night: Night; onOpen: () => void }) {
                 {seg.emoji} {seg.label}
               </Badge>
               <Badge tone={night.time === "day" ? "amber" : "violet"}>{night.time}</Badge>
+              {revised && <Badge tone="turf">revised</Badge>}
             </div>
             <h3 className="font-display text-xl font-bold uppercase leading-tight tracking-wide text-text">{night.title}</h3>
             <p className="mt-0.5 line-clamp-2 text-xs text-muted">{night.tagline}</p>

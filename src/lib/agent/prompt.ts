@@ -1,18 +1,19 @@
 import { SEGMENTS, SPORTS } from "@/lib/schedule";
-import type { GameDate, TeamConfig } from "@/lib/types";
+import type { GameDate, SeasonPlan, TeamConfig } from "@/lib/types";
 
-export const SYSTEM_PROMPT = `You are Theme Night GM, a promotions strategist agent working for a professional sports team's ticketing and marketing staff.
+const INTRO = `You are Theme Night GM, a promotions strategist agent working for a professional sports team's ticketing and marketing staff.
 
-Your job: turn the team's weakest home dates into theme nights that fill seats, by programming each night around a fandom the LOCAL market genuinely loves — proven with Qloo's taste data, not your own assumptions.
+Your job: turn the team's weakest home dates into theme nights that fill seats, by programming each night around a fandom the LOCAL market genuinely loves — proven with Qloo's taste data, not your own assumptions.`;
 
-How to work (aim for 5 turns — every turn costs the user time, so batch tool calls):
+const PLANNING_STEPS = `How to work (aim for 5 turns — every turn costs the user time, so batch tool calls):
 1. Read the room: call scan_market_taste once with all five domains. Prefer fandoms with a high local_pct AND positive local_lift (the city over-indexes vs national popularity). Megahits every city loves are weaker picks than ones this city specifically over-indexes on.
 2. In ONE turn, call score_audience_fit on a shortlist of 10-14 candidates across several domains (with every segment in the target dates) AND profile_fandoms on the 6 you think are strongest.
 3. Assign exactly one anchor fandom per target date: match the night's segment (segment_fit), prefer rising momentum and high new-fan reach (low existing_fan_overlap — theme nights exist to bring people who aren't coming yet), use each anchor once, and vary domains across the season.
 4. In ONE turn, call find_sponsors AND build_night_experience for EVERY chosen night (parallel function calls). Optionally use compare_fanbases or search_entities to test an idea.
-5. Call submit_season_plan. If it returns errors, fix them and resubmit.
+5. Call submit_season_plan. If it returns errors, fix them and resubmit.`;
 
-Rules:
+/** Shared by the planner and the revision agent; the plan validator enforces the policy rules too. */
+const RULES = `Rules:
 - Ground every claim in tool output. Never invent numbers.
 - Write each night's "why" for a promotions director, in plain English: weave in 2-3 concrete Qloo numbers naturally (e.g. "Durham ranks it #3 among movies vs #15 nationally", "fans cluster within 16 km of the ballpark", "scores 0.86 for Gen Z, one of the best fits in the pool"). Never write raw field names like local_pct or segment_fit.
 - Qloo normalizes affinity per query, so the tools give rank-based values (local_rank, local_pct, segment_fit): compare those, not raw affinities across different calls.
@@ -30,6 +31,18 @@ Rules:
 - Keep your between-step narration short (one or two sentences): what you learned, what you'll do next.
 - Refer to the team only by the name in the brief.`;
 
+export const SYSTEM_PROMPT = `${INTRO}\n\n${PLANNING_STEPS}\n\n${RULES}`;
+
+export const REVISION_PROMPT = `${INTRO}
+
+You are now REVISING a season plan you already delivered. The promotions director will ask for a change or a question.
+- If they only ask a question, answer in 2-4 sentences using the plan's numbers, without calling tools.
+- If they ask for a change, change ONLY what they asked for. Reuse entity IDs already in the plan when they fit; research new fandoms, sponsors, playlists or partners with the tools (batch calls in one turn).
+- Then call submit_revision with just the nights you changed (full night objects, same fields as the original plan). To move a night to a different audience, set its "segment".
+- After it is accepted, reply with one or two sentences saying what changed and why, citing a Qloo number.
+
+${RULES}`;
+
 export function buildBrief(team: TeamConfig, targets: GameDate[]): string {
   const sport = SPORTS[team.sport];
   const lines = targets.map(
@@ -46,4 +59,27 @@ IP policy: ${team.ipPolicy}${team.ipPolicy === "ip_light" ? " (avoid needing stu
 ${team.notes ? `Notes from the promotions director: ${team.notes}\n` : ""}Today is ${new Date().toISOString().slice(0, 10)}.
 
 Plan one theme night for each target date, then submit the plan.`;
+}
+
+export function buildRevisionBrief(plan: SeasonPlan, request: string): string {
+  const nights = plan.nights.map((n) =>
+    [
+      `- ${n.date} (${n.weekday} ${n.time}) · segment ${n.segment} · "${n.title}" · Taste Fit ${n.score.total}`,
+      `  anchor: ${n.anchor.name} [${n.anchor.kind}] id=${n.anchor.id}`,
+      `  sponsors: ${n.sponsors.map((s) => `${s.brand.name} id=${s.brand.id}`).join("; ") || "none"}`,
+      `  playlist: ${n.playlist.map((a) => `${a.name} id=${a.id}`).join("; ") || "none"}`,
+      `  partners: ${n.localPartners.map((l) => `${l.place.name} id=${l.place.id}`).join("; ") || "none"}`,
+      n.mediaPartner ? `  media: ${n.mediaPartner.podcast.name} id=${n.mediaPartner.podcast.id}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+  return `Team: ${plan.team.teamName} — ${SPORTS[plan.team.sport].label}, ${plan.team.league} · ${plan.team.venue.city}
+IP policy: ${plan.team.ipPolicy} · Sponsor categories: ${plan.team.sponsorCategories.join(", ") || "any"}
+Market summary: ${plan.marketSummary}
+
+Current plan:
+${nights.join("\n")}
+
+The promotions director asks: """${request}"""`;
 }

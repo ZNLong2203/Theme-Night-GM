@@ -175,6 +175,8 @@ export interface SeasonPlan {
   mode: RunMode;
   /** LLM-only control plan for the same dates, fact-checked with Qloo (added on demand). */
   baseline?: BaselineResult;
+  /** "Ask the GM" changes applied after the original run. */
+  revisions?: { at: string; request: string; summary: string; changedDates: string[] }[];
 }
 
 export interface RunMode {

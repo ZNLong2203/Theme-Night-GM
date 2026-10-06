@@ -1,5 +1,5 @@
 import "server-only";
-import { FinishReason, GoogleGenAI, ThinkingLevel, type Content, type Part } from "@google/genai";
+import { FinishReason, GoogleGenAI, ThinkingLevel, type Content, type FunctionDeclaration, type Part } from "@google/genai";
 import { PRESETS } from "@/lib/presets";
 import { QlooRecorder, qlooIsLive } from "@/lib/qloo/client";
 import { DAY, kvSet, storeKind } from "@/lib/store";
@@ -7,7 +7,7 @@ import { TasteContext } from "@/lib/qloo/workflows";
 import type { AgentEvent, RunMode, SeasonPlan, TeamConfig } from "@/lib/types";
 import { runAutopilot } from "./autopilot";
 import { buildBrief, SYSTEM_PROMPT } from "./prompt";
-import { FUNCTION_DECLARATIONS, runTool, type RunContext } from "./tools";
+import { FUNCTION_DECLARATIONS, runTool, TOOLS, type RunContext, type ToolRegistry } from "./tools";
 
 export const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
 const MAX_STEPS = 12;
@@ -56,7 +56,14 @@ export async function runAgent(team: TeamConfig, send: (event: AgentEvent) => vo
 
   try {
     if (mode.llm === "gemini") {
-      llmSteps = await geminiLoop(run, started, signal);
+      llmSteps = await geminiLoop(run, started, signal, {
+        system: SYSTEM_PROMPT,
+        brief: buildBrief(run.team, run.targets),
+        declarations: FUNCTION_DECLARATIONS,
+        registry: TOOLS,
+        nudge:
+          "You haven't submitted an accepted plan yet. Finish any missing research, then call submit_season_plan with exactly one night per target date using only IDs from tool results.",
+      });
     } else {
       await runAutopilot(run);
     }
@@ -84,13 +91,27 @@ async function persistRun(plan: SeasonPlan, log: AgentEvent[]) {
   await Promise.all(saves);
 }
 
-async function geminiLoop(run: RunContext, started: number, signal?: AbortSignal): Promise<number> {
+export interface LoopOptions {
+  system: string;
+  brief: string;
+  declarations: FunctionDeclaration[];
+  registry: ToolRegistry;
+  /** Sent when the model stops calling tools before submitting; omit to accept a text-only answer. */
+  nudge?: string;
+  deadlineMs?: number;
+  /** Give the model one more turn after an accepted submission so it can summarize the change. */
+  replyAfterSubmit?: boolean;
+}
+
+/** Gemini function-calling loop shared by the planner and the revision agent. */
+export async function geminiLoop(run: RunContext, started: number, signal: AbortSignal | undefined, options: LoopOptions): Promise<number> {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  const contents: Content[] = [{ role: "user", parts: [{ text: buildBrief(run.team, run.targets) }] }];
+  const contents: Content[] = [{ role: "user", parts: [{ text: options.brief }] }];
   let nudges = 0;
   let steps = 0;
+  let finalTurn = false;
 
-  const deadline = AbortSignal.timeout(Math.max(1_000, LLM_DEADLINE_MS - (Date.now() - started)));
+  const deadline = AbortSignal.timeout(Math.max(1_000, (options.deadlineMs ?? LLM_DEADLINE_MS) - (Date.now() - started)));
   const abort = signal ? AbortSignal.any([signal, deadline]) : deadline;
 
   for (let step = 0; step < MAX_STEPS; step++) {
@@ -104,8 +125,8 @@ async function geminiLoop(run: RunContext, started: number, signal?: AbortSignal
         model: GEMINI_MODEL,
         contents,
         config: {
-          systemInstruction: SYSTEM_PROMPT,
-          tools: [{ functionDeclarations: FUNCTION_DECLARATIONS }],
+          systemInstruction: options.system,
+          tools: [{ functionDeclarations: options.declarations }],
           thinkingConfig: { thinkingLevel: THINKING_LEVEL, includeThoughts: true },
           abortSignal: abort,
         },
@@ -147,24 +168,18 @@ async function geminiLoop(run: RunContext, started: number, signal?: AbortSignal
       run.emit({ type: part.thought ? "thought" : "message", text: part.text.trim() });
     }
 
+    if (finalTurn) break;
     if (!calls.length) {
-      if (run.submitted || nudges >= 2) break;
+      if (run.submitted || !options.nudge || nudges >= 2) break;
       nudges += 1;
-      contents.push({
-        role: "user",
-        parts: [
-          {
-            text: "You haven't submitted an accepted plan yet. Finish any missing research, then call submit_season_plan with exactly one night per target date using only IDs from tool results.",
-          },
-        ],
-      });
+      contents.push({ role: "user", parts: [{ text: options.nudge }] });
       continue;
     }
 
     const responses: Part[] = await Promise.all(
       calls.map(async (call, i) => {
         const callId = call.id ?? `s${step}_${i}`;
-        const output = await runTool(call.name ?? "", call.args, callId, run);
+        const output = await runTool(call.name ?? "", call.args, callId, run, options.registry);
         const isError = Boolean(output && typeof output === "object" && "error" in output);
         return {
           functionResponse: {
@@ -177,7 +192,10 @@ async function geminiLoop(run: RunContext, started: number, signal?: AbortSignal
     );
     contents.push({ role: "user", parts: responses });
 
-    if (run.submitted) break;
+    if (run.submitted) {
+      if (!options.replyAfterSubmit) break;
+      finalTurn = true;
+    }
   }
   return steps;
 }

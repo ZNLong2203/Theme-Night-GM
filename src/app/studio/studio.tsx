@@ -19,7 +19,7 @@ export function Studio() {
   const [team, setTeam] = useState<TeamConfig>(() => teamFromPreset(preset));
   const [view, setView] = useState<"setup" | "run">(() => (params.get("autorun") || params.get("replay") ? "run" : "setup"));
   const recent = useSavedPlans();
-  const { state, start, replay, stop, load } = useAgentRun();
+  const { state, start, replay, stop, load, setPlan } = useAgentRun();
   const [now, setNow] = useState(() => Date.now());
   const booted = useRef(false);
 
@@ -142,7 +142,7 @@ export function Studio() {
               </Card>
             )}
 
-            {state.plan && <SeasonBoard plan={state.plan} />}
+            {state.plan && <SeasonBoard plan={state.plan} onPlanChange={state.status === "running" ? undefined : setPlan} />}
 
             <section className={state.plan ? "mt-8" : ""}>
               {state.plan && (
