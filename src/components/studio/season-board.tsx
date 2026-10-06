@@ -394,7 +394,12 @@ function downloadJson(plan: SeasonPlan) {
 }
 
 function downloadCsv(plan: SeasonPlan) {
-  const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+  // Spreadsheets run cells that start with = + - @ (or tab/CR) as formulas, even when quoted. Titles come from
+  // the LLM and anchor names from Qloo (the idol group "=LOVE"), so prefix a ' to keep them plain text.
+  const esc = (v: string | number) => {
+    const text = typeof v === "string" && /^[=+\-@\t\r]/.test(v) ? `'${v}` : String(v);
+    return `"${text.replace(/"/g, '""')}"`;
+  };
   const rows = [
     ["Date", "Weekday", "Time", "Segment", "Title", "Anchor fandom", "Taste Fit", "Sponsor prospects", "Giveaway", "IP risk"],
     ...plan.nights.map((n) => [
