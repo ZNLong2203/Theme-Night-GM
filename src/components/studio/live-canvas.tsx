@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, Flame, Map as MapIcon, Receipt, Store, Table2, Users } from "lucide-react";
+import { ArrowUpRight, Flame, Map as MapIcon, Receipt, Shuffle, Store, Table2, Users } from "lucide-react";
 import { useState } from "react";
 import { SEGMENTS } from "@/lib/schedule";
 import type { EntityProfile, SegmentId, Venue } from "@/lib/types";
@@ -38,7 +38,7 @@ export function LiveCanvas({ state, venue }: { state: RunState; venue: Venue }) 
     market: state.scan?.domains.reduce((n, d) => n + d.entities.length, 0) ?? 0,
     fandoms: state.profiles.length,
     fit: state.fit.length,
-    kits: state.sponsors.length + state.experiences.length,
+    kits: state.sponsors.length + state.experiences.length + state.crossovers.length,
     receipts: state.requests.length,
   };
 
@@ -257,9 +257,10 @@ function FitMatrix({ rows }: { rows: RunState["fit"] }) {
 
 function KitBoard({ state }: { state: RunState }) {
   const anchors = [...new Set([...state.sponsors.map((s) => s.anchor), ...state.experiences.map((e) => e.anchor)])];
-  if (!anchors.length) return <Empty>Sponsor prospects, playlists and local partners will appear here.</Empty>;
+  if (!anchors.length && !state.crossovers.length) return <Empty>Sponsor prospects, playlists and local partners will appear here.</Empty>;
   return (
     <div className="space-y-4">
+      {state.crossovers.length > 0 && <SharedTaste crossovers={state.crossovers} />}
       {anchors.map((anchor) => {
         const s = state.sponsors.find((x) => x.anchor === anchor);
         const e = state.experiences.find((x) => x.anchor === anchor);
@@ -274,6 +275,42 @@ function KitBoard({ state }: { state: RunState }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** compare_fanbases results: the Qloo taste tags that bridge two fan bases, which the GM leans on for activations and copy. */
+function SharedTaste({ crossovers }: { crossovers: RunState["crossovers"] }) {
+  return (
+    <div className="rounded-lg border border-line bg-bg p-3">
+      <div className="mb-2 flex items-center gap-1.5 font-display text-base font-bold uppercase tracking-wide">
+        <Shuffle size={14} className="text-amber" /> Shared taste
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {crossovers.map((c, i) => {
+          const tags = c.tags.slice(0, 8);
+          const top = Math.max(...tags.map((t) => t.score), 0) || 1;
+          return (
+            <div key={`${c.a}|${c.b}|${i}`}>
+              <div className="mb-1.5 truncate text-xs text-muted">
+                <span className="text-text">{c.a}</span> × <span className="text-text">{c.b}</span>
+              </div>
+              <ul className="space-y-1">
+                {tags.map((t, j) => (
+                  <li key={`${t.name}-${j}`} className="flex items-center gap-2">
+                    <span className="w-32 shrink-0 truncate text-xs text-text" title={t.name}>
+                      {t.name}
+                    </span>
+                    <Meter value={t.score / top} className="h-1" color="var(--turf)" />
+                    <span className="w-9 shrink-0 text-right font-mono text-[10px] text-faint">{t.score.toFixed(2)}</span>
+                  </li>
+                ))}
+                {!tags.length && <li className="text-xs text-faint">No bridging tags found.</li>}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
