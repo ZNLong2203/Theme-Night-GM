@@ -34,9 +34,17 @@ export function AgentTrace({ timeline, requests, running }: { timeline: Timeline
         if (item.kind === "llm") {
           return (
             <li key={item.id} className="flex items-center gap-2 pl-1 font-mono text-[11px] text-faint">
-              {item.status === "started" ? <Loader2 size={12} className="animate-spin text-sky" /> : <Sparkles size={12} className="text-sky" />}
+              {item.status === "started" ? (
+                <Loader2 size={12} className="animate-spin text-sky" />
+              ) : item.status === "interrupted" ? (
+                <AlertTriangle size={12} />
+              ) : (
+                <Sparkles size={12} className="text-sky" />
+              )}
               {item.status === "started" ? (
                 <span className="text-sky">Gemini is deciding the next step…</span>
+              ) : item.status === "interrupted" ? (
+                <span>Gemini step {item.step} · interrupted</span>
               ) : (
                 <span>
                   Gemini step {item.step} · {((item.ms ?? 0) / 1000).toFixed(1)}s{item.outputTokens ? ` · ${item.outputTokens.toLocaleString()} tokens` : ""}

@@ -46,6 +46,11 @@ export function Studio() {
         .catch(() => start(team));
     } else if (params.get("autorun")) {
       start(team);
+      // Consumed: a reload (or Back to this entry) must not quietly start, and pay for, another live run.
+      const rest = new URLSearchParams(params.toString());
+      rest.delete("autorun");
+      const query = rest.toString();
+      window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
     }
   }, [params, preset.slug, replay, start, team]);
 

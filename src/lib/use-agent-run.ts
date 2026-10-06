@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useReducer, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useReducer, useRef, useSyncExternalStore } from "react";
 import type {
   AgentEvent,
   EntityCard,
@@ -26,7 +26,7 @@ export interface TimelineTool {
 export type TimelineItem =
   | { id: string; kind: "thought" | "message"; text: string; at: number }
   | { id: string; kind: "tool"; tool: TimelineTool; at: number }
-  | { id: string; kind: "llm"; step: number; status: "started" | "finished"; ms?: number; outputTokens?: number; at: number };
+  | { id: string; kind: "llm"; step: number; status: "started" | "finished" | "interrupted"; ms?: number; outputTokens?: number; at: number };
 
 export interface RunState {
   status: "idle" | "running" | "done" | "error";
@@ -64,6 +64,7 @@ type Action =
   | { type: "reset" }
   | { type: "event"; event: AgentEvent }
   | { type: "fail"; message: string }
+  | { type: "stopped" }
   | { type: "load"; plan: SeasonPlan }
   | { type: "replace_plan"; plan: SeasonPlan };
 
@@ -95,9 +96,36 @@ function applyUi(state: RunState, ui: ToolUIData): RunState {
   }
 }
 
+/**
+ * A Gemini step that never reported `finished` (deadline, API error, Stop). Steps run one at a time and report
+ * before their tool calls, so a newer step or a tool call (e.g. from the autopilot) also means it is over.
+ */
+function closeLlm(timeline: TimelineItem[]): TimelineItem[] {
+  return timeline.map((item) => (item.kind === "llm" && item.status === "started" ? { ...item, status: "interrupted" } : item));
+}
+
+/** Close rows still spinning when a run ends: no `finished` or `tool_result` is coming for them any more. */
+function settle(timeline: TimelineItem[]): TimelineItem[] {
+  return closeLlm(timeline).map((item) =>
+    item.kind === "tool" && item.tool.status === "running"
+      ? { ...item, tool: { ...item.tool, status: "error", summary: "Interrupted before it returned." } }
+      : item,
+  );
+}
+
 function reducer(state: RunState, action: Action): RunState {
   if (action.type === "reset") return { ...initial, status: "running", startedAt: Date.now() };
-  if (action.type === "fail") return { ...state, status: "error", error: action.message };
+  if (action.type === "fail") return { ...state, status: "error", error: action.message, timeline: settle(state.timeline) };
+  if (action.type === "stopped") {
+    if (state.status !== "running") return state;
+    return {
+      ...state,
+      status: state.plan ? "done" : "error",
+      error: state.plan ? state.error : "Stopped before the GM finished.",
+      timeline: settle(state.timeline),
+      elapsedMs: state.startedAt ? Date.now() - state.startedAt : undefined,
+    };
+  }
   if (action.type === "replace_plan") return { ...state, plan: action.plan };
   if (action.type === "load") return { ...initial, status: "done", plan: action.plan, mode: action.plan.mode, requests: action.plan.requests, profiles: action.plan.profiles };
 
@@ -113,7 +141,7 @@ function reducer(state: RunState, action: Action): RunState {
     case "llm_step": {
       const id = `llm-${event.step}`;
       if (event.status === "started") {
-        return { ...next, timeline: [...next.timeline, { id, kind: "llm", step: event.step, status: "started", at: now }] };
+        return { ...next, timeline: [...closeLlm(next.timeline), { id, kind: "llm", step: event.step, status: "started", at: now }] };
       }
       return {
         ...next,
@@ -126,7 +154,7 @@ function reducer(state: RunState, action: Action): RunState {
       return {
         ...next,
         timeline: [
-          ...next.timeline,
+          ...closeLlm(next.timeline),
           {
             id: event.callId,
             kind: "tool",
@@ -151,7 +179,14 @@ function reducer(state: RunState, action: Action): RunState {
     case "error":
       return { ...next, error: event.message };
     case "done":
-      return { ...next, status: next.plan ? "done" : "error", elapsedMs: event.elapsedMs, llmSteps: event.llmSteps, error: next.plan ? next.error : (next.error ?? "The agent finished without a plan.") };
+      return {
+        ...next,
+        status: next.plan ? "done" : "error",
+        timeline: settle(next.timeline),
+        elapsedMs: event.elapsedMs,
+        llmSteps: event.llmSteps,
+        error: next.plan ? next.error : (next.error ?? "The agent finished without a plan."),
+      };
     default:
       return next;
   }
@@ -201,6 +236,20 @@ export function savePlan(plan: SeasonPlan) {
 export function useAgentRun() {
   const [state, dispatch] = useReducer(reducer, initial);
   const abortRef = useRef<AbortController | null>(null);
+  const mounted = useRef(false);
+
+  // Abort when the owner unmounts (leaving Studio, closing the board) so the server stops spending Qloo
+  // requests, Gemini tokens and a concurrent-run slot on a run nobody is watching. StrictMode re-runs
+  // effects in dev (cleanup, then setup, synchronously), so only abort if no setup followed.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      queueMicrotask(() => {
+        if (!mounted.current) abortRef.current?.abort();
+      });
+    };
+  }, []);
 
   const handle = useCallback((event: AgentEvent) => {
     dispatch({ type: "event", event });
@@ -213,6 +262,7 @@ export function useAgentRun() {
       const controller = new AbortController();
       abortRef.current = controller;
       dispatch({ type: "reset" });
+      let finished = false;
       try {
         const response = await fetch(url, {
           method: "POST",
@@ -239,11 +289,17 @@ export function useAgentRun() {
               const event = JSON.parse(line.slice(6)) as AgentEvent;
               handle(event);
               if (event.type === "plan") onPlan?.(event.plan);
+              if (event.type === "done") finished = true;
             }
           }
         }
+        // maxDuration or a proxy cut the stream: no `done` is coming, so end the run here.
+        if (!finished && !controller.signal.aborted) dispatch({ type: "fail", message: "The connection closed before the GM finished. Try again." });
       } catch (error) {
+        // Aborts come from stop(), load(), a newer run or unmount, and each of those settles the state itself.
         if ((error as Error).name !== "AbortError") dispatch({ type: "fail", message: (error as Error).message });
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null;
       }
     },
     [handle],
@@ -265,17 +321,32 @@ export function useAgentRun() {
       abortRef.current = controller;
       dispatch({ type: "reset" });
       for (const event of events) {
-        if (controller.signal.aborted) return;
         const delay = event.type === "qloo_request" ? 35 : event.type === "tool_call" ? 260 : event.type === "thought" ? 700 : 120;
         await new Promise((r) => setTimeout(r, delay / speed));
+        // Checked after the wait: Stop (or a newer run) may have landed while we slept.
+        if (controller.signal.aborted) return;
         handle(event);
       }
+      if (!events.some((e) => e.type === "done")) dispatch({ type: "fail", message: "The recording ends before the run finished." });
+      if (abortRef.current === controller) abortRef.current = null;
     },
     [handle],
   );
 
-  const stop = useCallback(() => abortRef.current?.abort(), []);
-  const load = useCallback((plan: SeasonPlan) => dispatch({ type: "load", plan }), []);
+  const stop = useCallback(() => {
+    const controller = abortRef.current;
+    if (!controller) return;
+    abortRef.current = null;
+    controller.abort();
+    dispatch({ type: "stopped" });
+  }, []);
+
+  const load = useCallback((plan: SeasonPlan) => {
+    // A run still streaming would keep writing its events, and finally its own plan, over the one being opened.
+    abortRef.current?.abort();
+    abortRef.current = null;
+    dispatch({ type: "load", plan });
+  }, []);
   const setPlan = useCallback((plan: SeasonPlan) => {
     dispatch({ type: "replace_plan", plan });
     savePlan(plan);
