@@ -26,7 +26,7 @@ export function BaselineCompare({ plan }: { plan: SeasonPlan }) {
         body: JSON.stringify(plan.team),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Control run failed");
+      if (!res.ok) throw new Error(Array.isArray(body.error) ? body.error.join(" ") : (body.error ?? "Control run failed"));
       setResult(body);
       savePlan({ ...plan, baseline: body });
     } catch (e) {
