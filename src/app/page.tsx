@@ -1,4 +1,4 @@
-import { ArrowRight, Check, CircleSlash, Database, Lock, MapPinned, Play, Receipt, ShieldCheck, Ticket, Users, X } from "lucide-react";
+import { ArrowRight, Check, CircleSlash, Database, Dna, Lock, MapPinned, Play, Receipt, ShieldCheck, Ticket, Users, X } from "lucide-react";
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { REPO_URL } from "@/lib/config";
@@ -243,6 +243,29 @@ export default async function Home() {
               ))}
             </div>
           </div>
+        </section>
+
+        {/* Market DNA teaser */}
+        <section className="mx-auto max-w-7xl px-4 pt-16">
+          <Link
+            href="/market-dna?a=Durham%2C+North+Carolina&b=Los+Angeles%2C+California"
+            className="group grid gap-4 rounded-xl border border-line bg-surface p-5 transition-colors hover:border-amber/50 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-center md:p-6"
+          >
+            <span className="grid h-12 w-12 place-items-center rounded-lg border border-amber/30 bg-amber/10 text-amber">
+              <Dna size={22} />
+            </span>
+            <span className="min-w-0">
+              <span className="block font-mono text-[11px] uppercase tracking-[0.18em] text-amber">Market DNA</span>
+              <span className="mt-0.5 block font-display text-2xl font-bold uppercase tracking-wide">Durham is not Los Angeles</span>
+              <span className="mt-1 block max-w-2xl text-sm text-muted">
+                Compare any two markets side by side: what only one city loves, what both share, and how far each pick over-indexes locally.
+                That local edge is what every night the GM plans is built on.
+              </span>
+            </span>
+            <span className="inline-flex items-center gap-2 font-semibold text-amber">
+              Compare markets <ArrowRight size={18} className="transition-transform group-hover:translate-x-0.5" />
+            </span>
+          </Link>
         </section>
 
         {/* Score + responsibility */}

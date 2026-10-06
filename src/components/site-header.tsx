@@ -40,6 +40,9 @@ export function SiteHeader({ mode }: { mode?: RunMode }) {
           <span className="hidden sm:block">
             <ModeBadges mode={mode ?? status} />
           </span>
+          <Link href="/market-dna" className="whitespace-nowrap hover:text-text">
+            Market DNA
+          </Link>
           <Link href="/studio" className="hover:text-text">
             Studio
           </Link>
