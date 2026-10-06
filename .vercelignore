@@ -1,0 +1,7 @@
+# Secrets live in Vercel's environment settings, never in the upload.
+.env*
+!.env.example
+.claude
+.next
+node_modules
+coverage
