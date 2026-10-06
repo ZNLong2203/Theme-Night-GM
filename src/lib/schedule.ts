@@ -89,8 +89,9 @@ export function generateSchedule(sport: Sport): GameDate[] {
     let o = 0;
     while (d < utc(2027, 10, 20)) {
       out.push(game(d, "night", opponents[o++ % opponents.length]));
-      d = addDays(d, o % 5 === 0 ? 11 : 14);
-      if (o % 5 === 0) d = addDays(d, -3); // occasional Wednesday match
+      // Saturdays every other week, with every fifth match a midweek (Wednesday) fixture:
+      // Sat → Wed is 11 days, then Wed → Sat is 10, so the season returns to its Saturday cadence.
+      d = addDays(d, o % 5 === 0 ? 11 : d.getUTCDay() === 3 ? 10 : 14);
     }
   } else if (sport === "football") {
     let d = utc(2027, 9, 4);
