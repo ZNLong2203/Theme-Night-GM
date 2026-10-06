@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { formatDate, SEGMENTS } from "@/lib/schedule";
 import type { SeasonPlan } from "@/lib/types";
 import { useAgentRun } from "@/lib/use-agent-run";
-import { Button, Card, cn } from "../ui";
+import { Button, Card, cn, ModelText } from "../ui";
 import { AgentTrace } from "./agent-trace";
 
 /** Follow-up chat: the GM answers questions about the plan or revises specific nights with fresh Qloo research. */
@@ -90,7 +90,7 @@ export function AskTheGm({ plan, onPlanChange }: { plan: SeasonPlan; onPlanChang
           {replies.map((r) =>
             r.kind === "message" ? (
               <div key={r.id} className="max-w-2xl rounded-xl rounded-bl-sm border border-line bg-bg px-3.5 py-2 text-sm leading-relaxed text-text">
-                {r.text}
+                <ModelText text={r.text} />
               </div>
             ) : null,
           )}

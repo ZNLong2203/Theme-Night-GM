@@ -4,7 +4,7 @@ import { AlertTriangle, Brain, CheckCircle2, ChevronRight, Loader2, MessageSquar
 import { useEffect, useRef, useState } from "react";
 import type { TimelineItem } from "@/lib/use-agent-run";
 import type { QlooRequestLog } from "@/lib/types";
-import { Badge, cn } from "../ui";
+import { Badge, cn, ModelText } from "../ui";
 
 const TOOL_TITLES: Record<string, string> = {
   scan_market_taste: "Read the room",
@@ -74,7 +74,9 @@ export function AgentTrace({ timeline, requests, running }: { timeline: Timeline
               <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md", item.kind === "thought" ? "bg-violet/10 text-violet" : "bg-sky/10 text-sky")}>
                 {item.kind === "thought" ? <Brain size={13} /> : <MessageSquare size={13} />}
               </span>
-              <p className={cn("text-[13px] leading-relaxed", item.kind === "thought" ? "italic text-muted" : "text-text")}>{item.text}</p>
+              <p className={cn("text-[13px] leading-relaxed", item.kind === "thought" ? "italic text-muted" : "text-text")}>
+                <ModelText text={item.text} />
+              </p>
             </li>
           );
         }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { cleanModelText } from "@/lib/text";
 import { clsx, type ClassValue } from "clsx";
 import {
   BookOpen,
@@ -162,6 +163,27 @@ export function KindBadge({ kind }: { kind: EntityKind }) {
       <Icon size={11} />
       {meta.label}
     </span>
+  );
+}
+
+/**
+ * Text the model wrote for people: **bold** and *italic* render, code ticks are dropped, and internal
+ * entity IDs (meant for tool arguments only) are removed. Everything else stays plain text, never HTML.
+ */
+export function ModelText({ text }: { text: string }) {
+  const clean = cleanModelText(text);
+  return (
+    <>
+      {clean.split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g).map((part, i) =>
+        part.length > 4 && part.startsWith("**") && part.endsWith("**") ? (
+          <strong key={i}>{part.slice(2, -2)}</strong>
+        ) : part.length > 2 && part.startsWith("*") && part.endsWith("*") ? (
+          <em key={i}>{part.slice(1, -1)}</em>
+        ) : (
+          part
+        ),
+      )}
+    </>
   );
 }
 

@@ -19,6 +19,7 @@ const RULES = `Rules:
 - Qloo normalizes affinity per query, so the tools give rank-based values (local_rank, local_pct, segment_fit): compare those, not raw affinities across different calls.
 - Read the indexes as indexes, not percentages of people. near_venue_index 0.5 means the venue's area holds its fair share of the fandom's local hotspots and higher means fans cluster near the venue: write "fans cluster near the ballpark (0.68 vs a 0.5 fair share)", never "68% of fans live nearby". existing_fan_overlap is a rank: low means the fandom ranks low with current sport fans, so write "mostly new to your current crowd", never "0% overlap".
 - Use measured language ("over-indexes", "ranks", "fits"). Never promise outcomes such as "guarantees", "will sell out" or "sure to".
+- Write plain sentences for people: no markdown symbols, and never show entity IDs in text (IDs belong only in tool arguments).
 - Trending data may come from Qloo's latest available window rather than the last few months: say "in Qloo's latest trending window", never "this month".
 - Only reference entity IDs that tools returned. Never make up IDs.
 - Qloo results are aggregate audience affinities, not facts about individuals: write "fans of X in this market over-index on Y", never claims about a specific person.
