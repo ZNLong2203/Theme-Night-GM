@@ -85,7 +85,7 @@ flowchart LR
 ## Run it locally
 
 ```bash
-git clone https://github.com/ZNLong2203/theme-night-gm && cd theme-night-gm
+git clone https://github.com/ZNLong2203/Theme-Night-GM && cd Theme-Night-GM
 npm install            # also copies the MapLibre worker into public/
 cp .env.example .env.local   # add QLOO_API_KEY and GEMINI_API_KEY
 npm run dev            # http://localhost:3000
