@@ -21,3 +21,21 @@ export function sensitiveTopic(card: Pick<EntityCard, "name" | "tags" | "subtitl
   const tag = card.tags?.find((t) => IN_TAGS.test(t.trim()));
   return tag?.toLowerCase();
 }
+
+/** Alcohol brands are never pitched for nights aimed at families or under-25s (who include minors). */
+const ALCOHOL = /\b(beer|brew\w*|wine\w*|spirits?|liquor|alcohol\w*|hard seltzer|seltzer|distill\w*|vodka|whisk(e)?y|tequila|rum|bourbon|lager)\b/i;
+
+export function isAlcoholBrand(card: Pick<EntityCard, "name" | "industries" | "category" | "tags">): boolean {
+  const text = [card.name, card.category ?? "", ...(card.industries ?? []), ...(card.tags ?? [])].join(" ");
+  return ALCOHOL.test(text.replace(/non[-\s]?alcoholic/gi, ""));
+}
+
+/**
+ * Identity-based nights (pride, heritage, faith...) are community partnerships a club builds with
+ * those communities — not something a taste model should infer from what an audience watches.
+ */
+const IDENTITY_NIGHT = /\b(pride|heritage|faith|ethnic\w*|religio\w*|nationality|immigrant|lgbt\w*)\b/i;
+
+export function identityTheme(title: string, tagline = ""): string | undefined {
+  return `${title} ${tagline}`.match(IDENTITY_NIGHT)?.[0].toLowerCase();
+}

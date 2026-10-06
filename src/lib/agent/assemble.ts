@@ -2,7 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { licensingFor } from "@/lib/licensing";
 import { computeScore } from "@/lib/scoring";
-import { sensitiveTopic } from "@/lib/sensitivity";
+import { identityTheme, isAlcoholBrand, sensitiveTopic } from "@/lib/sensitivity";
 import type { EntityCard, Night, SeasonPlan } from "@/lib/types";
 import type { RunContext } from "./tools";
 
@@ -74,6 +74,13 @@ export function assemblePlan(
       errors.push(`${anchor.name} on ${n.date} touches a sensitive topic ("${topic}") — pick a different anchor`);
       continue;
     }
+    const identity = identityTheme(n.title, n.tagline);
+    if (identity) {
+      errors.push(
+        `"${n.title}" on ${n.date} frames the night around identity ("${identity}"). Pride, heritage and faith nights are community partnerships, not taste programming — rename it around the fandom itself.`,
+      );
+      continue;
+    }
 
     const pick = <T,>(refs: T[], key: (r: T) => string, label: string) =>
       refs.flatMap((r) => {
@@ -83,7 +90,17 @@ export function assemblePlan(
       });
 
     const supporting = pick(n.supporting_entity_ids, (r) => r, "supporting entity").map((x) => x.card);
-    const sponsors = pick(n.sponsor_picks, (r) => r.brand_id, "sponsor").map((x) => ({ brand: x.card, angle: x.ref.angle }));
+    const youngCrowd = target.segment === "families" || target.segment === "gen_z";
+    const sponsors = pick(n.sponsor_picks, (r) => r.brand_id, "sponsor")
+      .filter((x) => {
+        if (youngCrowd && isAlcoholBrand(x.card)) {
+          warnings.push(`Removed alcohol sponsor ${x.card.name} from the ${target.segment} night on ${n.date}`);
+          return false;
+        }
+        return true;
+      })
+      .slice(0, 3)
+      .map((x) => ({ brand: x.card, angle: x.ref.angle }));
     const playlist = pick(n.playlist_artist_ids, (r) => r, "artist").map((x) => x.card);
     const localPartners = pick(n.local_partner_picks, (r) => r.place_id, "place").map((x) => ({ place: x.card, idea: x.ref.idea }));
     const media = n.media_partner ? lookup(n.media_partner.podcast_id) : undefined;

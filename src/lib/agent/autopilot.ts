@@ -1,14 +1,13 @@
 import "server-only";
 import { scoreIn } from "@/lib/qloo/workflows";
 import { SEGMENTS } from "@/lib/schedule";
-import { sensitiveTopic } from "@/lib/sensitivity";
+import { isAlcoholBrand, sensitiveTopic } from "@/lib/sensitivity";
 import type { EntityCard, EntityKind, SegmentId } from "@/lib/types";
 import type { PlanSubmissionT } from "./assemble";
 import { runTool, type RunContext } from "./tools";
 
 type Brand = { id: string; name: string; sponsor_category?: string; industries?: string[] };
-const ALCOHOL = /beer|brew|wine|spirit|liquor|alcohol|seltzer|distill|vodka|whisk|tequila/i;
-const isAlcohol = (b: Brand) => ALCOHOL.test([b.name, b.sponsor_category ?? "", ...(b.industries ?? [])].join(" "));
+const isAlcohol = (b: Brand) => isAlcoholBrand({ name: b.name, category: b.sponsor_category, industries: b.industries });
 type Experience = { playlist_artists?: { id: string }[]; nearby_places?: { id: string; name: string }[]; podcasts?: { id: string; name: string }[] };
 
 /**
