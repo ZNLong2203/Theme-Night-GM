@@ -2,6 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { licensingFor } from "@/lib/licensing";
 import { computeScore } from "@/lib/scoring";
+import { sensitiveTopic } from "@/lib/sensitivity";
 import type { EntityCard, Night, SeasonPlan } from "@/lib/types";
 import type { RunContext } from "./tools";
 
@@ -68,6 +69,11 @@ export function assemblePlan(
       errors.push(`anchor_entity_id "${n.anchor_entity_id}" on ${n.date} was not returned by any Qloo tool call`);
       continue;
     }
+    const topic = sensitiveTopic(anchor);
+    if (topic) {
+      errors.push(`${anchor.name} on ${n.date} touches a sensitive topic ("${topic}") — pick a different anchor`);
+      continue;
+    }
 
     const pick = <T,>(refs: T[], key: (r: T) => string, label: string) =>
       refs.flatMap((r) => {
@@ -87,7 +93,7 @@ export function assemblePlan(
     const score = computeScore({
       entity: anchor,
       segment: target.segment,
-      localAffinity: taste.localAffinity.get(anchor.id),
+      localAffinity: taste.localPct.get(anchor.id),
       profile,
       segmentFit: taste.segmentFit.get(anchor.id),
       fanOverlap: taste.fanOverlap.get(anchor.id),

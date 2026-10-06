@@ -65,6 +65,12 @@ export interface EntityCard {
   localRank?: number;
   nationalRank?: number;
   lift?: number;
+  /** Rank percentile (0..1) inside the city's pool for this domain — comparable within a domain. */
+  localPct?: number;
+  /** Sponsor prospects: the sales category (resolved to a Qloo tag) this brand matched. */
+  category?: string;
+  /** feature.explainability: how much the anchor fandom drove this recommendation (0..1). */
+  explain?: number;
 }
 
 export type AgeBucket =
@@ -84,6 +90,8 @@ export interface TrendSeries {
   points: { date: string; percentile: number }[];
   direction: "rising" | "steady" | "cooling" | "unknown";
   changePct: number;
+  /** The Qloo trending window actually used (the hackathon dataset ends in 2025). */
+  window?: { start: string; end: string };
 }
 
 export interface HeatPoint {
@@ -177,7 +185,11 @@ export interface RunMode {
 
 export interface MarketScan {
   city: string;
+  /** How Qloo resolved the location signal, e.g. "Durham County, North Carolina, United States". */
+  resolvedAs?: string;
   domains: { kind: EntityKind; entities: EntityCard[]; evidence: string }[];
+  /** Domains Qloo couldn't answer for this market (kept so the agent can adapt instead of failing). */
+  unavailable?: { kind: EntityKind; reason: string }[];
 }
 
 /** UI payloads attached to tool results so the canvas can render rich evidence. */
@@ -199,6 +211,7 @@ export type ToolUIData =
 export type AgentEvent =
   | { type: "run_started"; runId: string; mode: RunMode; at: string }
   | { type: "thought"; text: string }
+  | { type: "llm_step"; step: number; status: "started" | "finished"; ms?: number; inputTokens?: number; outputTokens?: number }
   | { type: "message"; text: string }
   | { type: "tool_call"; callId: string; name: string; label: string; args: Record<string, unknown> }
   | { type: "qloo_request"; request: QlooRequestLog }

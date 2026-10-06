@@ -12,11 +12,11 @@ export const SCORE_WEIGHTS = {
 export const SCORE_LABELS: Record<keyof typeof SCORE_WEIGHTS, { label: string; help: string }> = {
   localAffinity: {
     label: "Local affinity",
-    help: "Qloo affinity for this fandom with a location signal on your city (/v2/insights · signal.location.query).",
+    help: "Rank percentile of this fandom among your city's top 25 in its domain, ranked by Qloo with the city as location signal (/v2/insights · signal.location.query).",
   },
   segmentFit: {
     label: "Audience fit",
-    help: "Qloo affinity when the same shortlist is scored for the night's target segment (age or life-stage audience signal).",
+    help: "Half: rank percentile when the same pool is re-ranked with the night's age or life-stage audience signal. Half: urn:demographics alignment for that segment.",
   },
   nearVenue: {
     label: "Fans near the venue",
@@ -24,11 +24,11 @@ export const SCORE_LABELS: Record<keyof typeof SCORE_WEIGHTS, { label: string; h
   },
   momentum: {
     label: "Momentum",
-    help: "Change in Qloo trending percentile over the last 16 weeks (/v2/trending).",
+    help: "Change in Qloo trending percentile across a 16-week window (/v2/trending; uses the latest window with data).",
   },
   newFanReach: {
     label: "New-fan reach",
-    help: "1 minus the affinity existing sport fans already have for this fandom: high = brings people who aren't coming yet.",
+    help: "Inverse of how highly existing sport fans (a league proxy entity) rank this fandom: high = brings people who aren't coming yet.",
   },
 };
 

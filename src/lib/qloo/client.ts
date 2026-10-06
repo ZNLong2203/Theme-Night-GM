@@ -7,8 +7,12 @@ const BASE_URL = process.env.QLOO_BASE_URL ?? "https://hackathon.api.qloo.com";
 const TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 2;
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
-const MAX_CONCURRENT = 4;
-const MIN_INTERVAL_MS = 220; // stays under the ~5 req/s other teams report
+// Live calls take 1–6 s each, so we overlap up to 10 while starting at most ~5 per second
+// (the rate other hackathon teams report as safe).
+const MAX_CONCURRENT = 10;
+const MIN_INTERVAL_MS = 200;
+/** /v2/insights rejects take > 50 with a 400 (verified live); clamp centrally so no workflow trips it. */
+const MAX_TAKE = 50;
 
 export const qlooIsLive = () => Boolean(process.env.QLOO_API_KEY);
 
@@ -72,8 +76,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 function normalize(params: Params): Record<string, string> {
   const out: Record<string, string> = {};
   for (const key of Object.keys(params).sort()) {
-    const value = params[key];
+    let value = params[key];
     if (value === undefined || value === "") continue;
+    if (key === "take") value = Math.max(1, Math.min(MAX_TAKE, Number(value) || 1));
     out[key] = String(value);
   }
   return out;

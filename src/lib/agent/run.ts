@@ -8,8 +8,11 @@ import { buildBrief, SYSTEM_PROMPT } from "./prompt";
 import { FUNCTION_DECLARATIONS, runTool, type RunContext } from "./tools";
 
 export const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
-const MAX_STEPS = 16;
-const TIME_BUDGET_MS = 230_000;
+const MAX_STEPS = 12;
+/** Hard deadline for the LLM loop; the autopilot then finishes on cached Qloo data well inside maxDuration (300 s). */
+const LLM_DEADLINE_MS = 200_000;
+const THINKING: Record<string, ThinkingLevel> = { low: ThinkingLevel.LOW, medium: ThinkingLevel.MEDIUM, high: ThinkingLevel.HIGH };
+const THINKING_LEVEL = THINKING[process.env.GEMINI_THINKING ?? "low"] ?? ThinkingLevel.LOW;
 
 export function runMode(): RunMode {
   return {
@@ -22,10 +25,10 @@ export function runMode(): RunMode {
 export async function runAgent(team: TeamConfig, emit: (event: AgentEvent) => void, signal?: AbortSignal) {
   const started = Date.now();
   const recorder = new QlooRecorder((request) => emit({ type: "qloo_request", request }));
-  const taste = new TasteContext(recorder, team.venue.city, team.venue);
+  const taste = new TasteContext(recorder, team.venue.city, team.venue, team.sport);
   const targets = team.dates.filter((d) => d.target).sort((a, b) => a.date.localeCompare(b.date));
   const mode = runMode();
-  const run: RunContext = { taste, team, targets, mode, emit };
+  const run: RunContext = { taste, team, targets, mode, emit, kits: new Map() };
   let llmSteps = 0;
 
   emit({ type: "run_started", runId: crypto.randomUUID(), mode, at: new Date().toISOString() });
@@ -60,20 +63,40 @@ async function geminiLoop(run: RunContext, started: number, signal?: AbortSignal
   let nudges = 0;
   let steps = 0;
 
-  for (let step = 0; step < MAX_STEPS; step++) {
-    if (signal?.aborted || Date.now() - started > TIME_BUDGET_MS) break;
-    steps += 1;
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        tools: [{ functionDeclarations: FUNCTION_DECLARATIONS }],
-        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM, includeThoughts: true },
-        abortSignal: signal,
-      },
-    });
+  const deadline = AbortSignal.timeout(Math.max(1_000, LLM_DEADLINE_MS - (Date.now() - started)));
+  const abort = signal ? AbortSignal.any([signal, deadline]) : deadline;
 
+  for (let step = 0; step < MAX_STEPS; step++) {
+    if (abort.aborted) break;
+    steps += 1;
+    let response;
+    const stepStarted = Date.now();
+    run.emit({ type: "llm_step", step: steps, status: "started" });
+    try {
+      response = await ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents,
+        config: {
+          systemInstruction: SYSTEM_PROMPT,
+          tools: [{ functionDeclarations: FUNCTION_DECLARATIONS }],
+          thinkingConfig: { thinkingLevel: THINKING_LEVEL, includeThoughts: true },
+          abortSignal: abort,
+        },
+      });
+    } catch (error) {
+      if (abort.aborted) break; // deadline or client disconnect: fall through to the safety net
+      throw error;
+    }
+
+    const usage = response.usageMetadata;
+    run.emit({
+      type: "llm_step",
+      step: steps,
+      status: "finished",
+      ms: Date.now() - stepStarted,
+      inputTokens: usage?.promptTokenCount,
+      outputTokens: (usage?.candidatesTokenCount ?? 0) + (usage?.thoughtsTokenCount ?? 0),
+    });
     const candidate = response.candidates?.[0];
     const content = candidate?.content;
     if (!content?.parts?.length) {

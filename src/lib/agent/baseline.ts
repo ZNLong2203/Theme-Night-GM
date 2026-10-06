@@ -2,9 +2,8 @@ import "server-only";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { z } from "zod";
 import { QlooRecorder } from "@/lib/qloo/client";
-import { fanbaseOverlap, profileEntities, scoreSegmentFit, searchEntities, localAffinityFor, TasteContext } from "@/lib/qloo/workflows";
+import { profileEntities, scoreCandidates, scoreIn, searchEntities, TasteContext } from "@/lib/qloo/workflows";
 import { SEGMENTS, SPORTS } from "@/lib/schedule";
-import { computeScore } from "@/lib/scoring";
 import type { BaselineNight, BaselineResult, EntityKind, TeamConfig } from "@/lib/types";
 import { GEMINI_MODEL, runMode } from "./run";
 
@@ -87,7 +86,7 @@ Return JSON only.`;
 
   // Fact-check with Qloo: resolve each pick, then score it exactly like the agent's picks.
   const recorder = new QlooRecorder();
-  const taste = new TasteContext(recorder, team.venue.city, team.venue);
+  const taste = new TasteContext(recorder, team.venue.city, team.venue, team.sport);
   const matches = await Promise.all(
     proposals.map(async (p) => {
       const found = await searchEntities(taste, p.anchor_name, [p.anchor_kind as EntityKind], 1).catch(() => []);
@@ -97,12 +96,9 @@ Return JSON only.`;
   const ids = [...new Set(matches.flatMap((m) => (m.match ? [m.match.id] : [])))];
   if (ids.length) {
     const segments = [...new Set(targets.map((t) => t.segment))];
-    await Promise.all([
-      localAffinityFor(taste, ids),
-      scoreSegmentFit(taste, ids, segments),
-      profileEntities(taste, ids.slice(0, 6)),
-      fanbaseOverlap(taste, team.sport, ids),
-    ]);
+    // Exactly the measurements the agent's anchors get: pool ranks, demographics, overlap, heatmap, trend.
+    await scoreCandidates(taste, ids, segments);
+    await profileEntities(taste, ids);
   }
 
   const nights: BaselineNight[] = targets.map((target) => {
@@ -120,14 +116,7 @@ Return JSON only.`;
       ...base,
       found: true,
       match: card,
-      score: computeScore({
-        entity: card,
-        segment: target.segment,
-        localAffinity: taste.localAffinity.get(card.id),
-        profile: taste.profiles.get(card.id),
-        segmentFit: taste.segmentFit.get(card.id),
-        fanOverlap: taste.fanOverlap.get(card.id),
-      }),
+      score: scoreIn(taste, card, target.segment),
       evidence: taste.evidence.get(card.id) ?? [],
     };
   });

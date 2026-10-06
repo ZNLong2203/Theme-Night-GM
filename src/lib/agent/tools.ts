@@ -4,16 +4,16 @@ import { z } from "zod";
 import {
   buildExperience,
   crossoverTags,
-  fanbaseOverlap,
   findSponsors,
   profileEntities,
   scanMarket,
-  scoreSegmentFit,
+  scoreCandidates,
+  scoreIn,
   searchEntities,
   type TasteContext,
 } from "@/lib/qloo/workflows";
 import { toolCallScope } from "@/lib/qloo/client";
-import { computeScore } from "@/lib/scoring";
+import { sensitiveTopic } from "@/lib/sensitivity";
 import type { AgentEvent, EntityCard, EntityKind, GameDate, RunMode, SegmentId, TeamConfig, ToolUIData } from "@/lib/types";
 import { assemblePlan, PlanSubmission, type PlanSubmissionT } from "./assemble";
 
@@ -24,7 +24,8 @@ export interface RunContext {
   mode: RunMode;
   emit: (event: AgentEvent) => void;
   submitted?: boolean;
-  fanbaseChecked?: boolean;
+  /** Night kits the agent already built, keyed by anchor ID — reused if the safety net has to finish. */
+  kits: Map<string, { sponsors?: unknown; experience?: unknown }>;
 }
 
 export interface ToolOutcome {
@@ -40,16 +41,21 @@ interface ToolDef<A> {
   execute: (args: A, run: RunContext) => Promise<ToolOutcome>;
 }
 
-const SCAN_KINDS = ["movie", "tv_show", "artist", "videogame", "podcast", "book"] as const;
+// Podcasts are media partners (build_night_experience), not theme-night anchors.
+const SCAN_KINDS = ["movie", "tv_show", "artist", "videogame", "book"] as const;
 const SEGMENT_IDS = ["families", "gen_z", "young_pros", "boomers"] as const;
 
+// Raw Qloo affinity is normalized per query, so the model sees rank-based numbers where we have them.
 const compact = (c: EntityCard) => ({
   id: c.id,
   name: c.name,
   kind: c.kind,
-  ...(c.affinity !== undefined ? { affinity: c.affinity } : {}),
+  ...(c.localPct !== undefined ? { local_pct: c.localPct } : c.affinity !== undefined ? { affinity: c.affinity } : {}),
   ...(c.popularity !== undefined ? { popularity: c.popularity } : {}),
   ...(c.lift !== undefined ? { local_lift: c.lift, local_rank: c.localRank, national_rank: c.nationalRank } : {}),
+  ...(c.category ? { sponsor_category: c.category } : {}),
+  ...(sensitiveTopic(c) ? { sensitive_topic: sensitiveTopic(c) } : {}),
+  ...(c.explain !== undefined ? { driven_by_anchor: c.explain } : {}),
   ...(c.year ? { year: c.year } : {}),
   ...(c.industries?.length ? { industries: c.industries } : {}),
   ...(c.tags?.length ? { tags: c.tags.slice(0, 4) } : {}),
@@ -71,14 +77,14 @@ const scanMarketTool: ToolDef<{ kinds: (typeof SCAN_KINDS)[number][]; min_popula
   declaration: {
     name: "scan_market_taste",
     description:
-      "Read the room: for the team's city, ask Qloo which fandoms (movies, TV, artists, video games, podcasts, books) the local audience has the strongest affinity for. Returns each entity's local affinity plus local_lift = how many places higher it ranks locally than by national popularity (positive = the city over-indexes). Call this first.",
+      "Read the room: for the team's city, ask Qloo which fandoms (movies, TV, artists, video games, books) the local audience has the strongest affinity for. Returns the city's top 25 per domain with local_rank, local_pct (rank percentile, 1 = the city's #1) and local_lift = how many places higher it ranks locally than by national popularity (positive = the city over-indexes). Call this first.",
     parametersJsonSchema: {
       type: "object",
       properties: {
-        kinds: { type: "array", items: { type: "string", enum: [...SCAN_KINDS] }, description: "Domains to scan. Use at least 4." },
+        kinds: { type: "array", items: { type: "string", enum: [...SCAN_KINDS] }, description: "Domains to scan. Scan all five." },
         min_popularity: {
           type: "number",
-          description: "0-1 national popularity floor so themes are recognizable. Default 0.7; lower it for niche markets.",
+          description: "0-1 national popularity floor so themes are recognizable. Default 0.8; lower it only if a domain comes back thin.",
         },
       },
       required: ["kinds"],
@@ -87,7 +93,7 @@ const scanMarketTool: ToolDef<{ kinds: (typeof SCAN_KINDS)[number][]; min_popula
   schema: z.object({ kinds: z.array(z.enum(SCAN_KINDS)).min(1), min_popularity: z.number().min(0).max(1).optional() }),
   label: (a) => `Scanning ${a.kinds.length} culture domains for local affinity`,
   async execute(args, run) {
-    const scan = await scanMarket(run.taste, args.kinds as EntityKind[], 10, args.min_popularity ?? 0.7);
+    const scan = await scanMarket(run.taste, args.kinds as EntityKind[], 10, args.min_popularity ?? 0.8);
     const total = scan.domains.reduce((n, d) => n + d.entities.length, 0);
     const topLift = scan.domains
       .flatMap((d) => d.entities)
@@ -97,9 +103,13 @@ const scanMarketTool: ToolDef<{ kinds: (typeof SCAN_KINDS)[number][]; min_popula
     return {
       output: {
         city: scan.city,
+        qloo_resolved_market: scan.resolvedAs,
         domains: scan.domains.map((d) => ({ kind: d.kind, evidence: d.evidence, entities: d.entities.map(compact) })),
+        ...(scan.unavailable?.length ? { unavailable_domains: scan.unavailable } : {}),
       },
-      summary: `${total} fandoms scored for ${scan.city}. Biggest local over-index: ${topLift.join(", ") || "n/a"}.`,
+      summary: `${total} fandoms ranked for ${scan.resolvedAs ?? scan.city}. Biggest local over-index: ${topLift.join(", ") || "n/a"}.${
+        scan.unavailable?.length ? ` Unavailable: ${scan.unavailable.map((u) => u.kind).join(", ")}.` : ""
+      }`,
       ui: { kind: "market_scan", scan },
     };
   },
@@ -132,7 +142,9 @@ const profileTool: ToolDef<{ entity_ids: string[] }> = {
           name: p.entity.name,
           strongest_age_affinity: topAges,
           gender_skew: p.demographics?.gender,
-          trend: p.trend ? `${p.trend.direction} (${p.trend.changePct > 0 ? "+" : ""}${p.trend.changePct}% over 16 weeks)` : "n/a",
+          trend: p.trend?.window
+            ? `${p.trend.direction} (${p.trend.changePct > 0 ? "+" : ""}${p.trend.changePct}% in Qloo trending ${p.trend.window.start} → ${p.trend.window.end})`
+            : "no trending data",
           near_venue_index: p.heat?.nearVenueIndex ?? null,
           taste_tags: p.tasteTags?.slice(0, 6),
           evidence: p.evidence,
@@ -150,7 +162,7 @@ const fitTool: ToolDef<{ entity_ids: string[]; segments: SegmentId[] }> = {
   declaration: {
     name: "score_audience_fit",
     description:
-      "Score a shortlist of fandoms for each audience segment the schedule needs (families, gen_z, young_pros, boomers) using Qloo demographic/audience signals plus the city location signal. Also measures overlap with the sport's existing fan base, then returns a provisional Taste Fit Score (0-100) for every fandom x segment. Use this to decide which fandom goes on which date.",
+      "Score a shortlist of fandoms for each audience segment the schedule needs (families, gen_z, young_pros, boomers). Each fandom is ranked inside its domain's pool (the city's top 25) under the segment's Qloo demographic/life-stage signal plus the city signal, blended with urn:demographics alignment. Also ranks overlap with the sport's existing fan base. Returns segment_fit (0-1), local_pct, existing_fan_overlap (0-1, high = fans we already have) and a provisional Taste Fit Score (0-100) per fandom x segment. Use this to decide which fandom goes on which date.",
     parametersJsonSchema: {
       type: "object",
       properties: {
@@ -164,34 +176,15 @@ const fitTool: ToolDef<{ entity_ids: string[]; segments: SegmentId[] }> = {
   label: (a) => `Scoring ${a.entity_ids.length} fandoms × ${a.segments.length} audience segments`,
   async execute(args, run) {
     const resolved = ids(run, args.entity_ids).slice(0, 14);
-    const rows = await scoreSegmentFit(run.taste, resolved, args.segments);
-    let proxyName: string | undefined;
-    if (!run.fanbaseChecked) {
-      const { proxy } = await fanbaseOverlap(run.taste, run.team.sport, resolved);
-      proxyName = proxy?.name;
-      run.fanbaseChecked = true;
-    } else {
-      const missing = resolved.filter((id) => !run.taste.fanOverlap.has(id));
-      if (missing.length) await fanbaseOverlap(run.taste, run.team.sport, missing);
-    }
+    const { rows, proxy } = await scoreCandidates(run.taste, resolved, args.segments);
+    const proxyName = proxy?.name;
     const output = rows.map(({ entity, fit }) => ({
       id: entity.id,
       name: entity.name,
-      segment_affinity: fit,
+      local_pct: run.taste.localPct.get(entity.id) ?? null,
+      segment_fit: fit,
       existing_fan_overlap: run.taste.fanOverlap.get(entity.id) ?? null,
-      taste_fit_score: Object.fromEntries(
-        args.segments.map((segment) => [
-          segment,
-          computeScore({
-            entity,
-            segment,
-            localAffinity: run.taste.localAffinity.get(entity.id),
-            profile: run.taste.profiles.get(entity.id),
-            segmentFit: fit,
-            fanOverlap: run.taste.fanOverlap.get(entity.id),
-          }).total,
-        ]),
-      ),
+      taste_fit_score: Object.fromEntries(args.segments.map((segment) => [segment, scoreIn(run.taste, entity, segment).total])),
     }));
     return {
       output: { fanbase_proxy: proxyName, rows: output },
@@ -205,7 +198,7 @@ const sponsorTool: ToolDef<{ anchor_entity_ids: string[]; categories?: string[] 
   declaration: {
     name: "find_sponsors",
     description:
-      "Find brands whose Qloo audience shares this theme's taste — the sponsor prospects for that night. Optionally prefer industries (e.g. Beverages, Restaurants, Automotive). Returns brands with affinity and industries.",
+      "Find brands whose Qloo audience shares this theme's taste — the sponsor prospects for that night. Each category (e.g. Beverages, Beer, Restaurants, Automotive) is resolved to a Qloo brand tag and used as filter.tags; leagues, teams and sports media are excluded. Returns brands with sponsor_category, industries and driven_by_anchor (explainability). Defaults to the team's sponsor categories.",
     parametersJsonSchema: {
       type: "object",
       properties: {
@@ -320,7 +313,7 @@ const submitTool: ToolDef<PlanSubmissionT> = {
     parametersJsonSchema: {
       type: "object",
       properties: {
-        market_summary: { type: "string", description: "2-3 sentences: what this market over-indexes on, with numbers." },
+        market_summary: { type: "string", description: "Max 60 words: what this market over-indexes on, with numbers." },
         nights: {
           type: "array",
           items: {
@@ -330,37 +323,37 @@ const submitTool: ToolDef<PlanSubmissionT> = {
               anchor_entity_id: { type: "string" },
               supporting_entity_ids: { type: "array", items: { type: "string" } },
               title: { type: "string", description: "Catchy theme-night name (no trademarked titles if IP policy is ip_light)." },
-              tagline: { type: "string" },
-              why: { type: "string", description: "2-3 sentences citing the Qloo numbers (affinity, lift, trend, venue index, segment fit)." },
+              tagline: { type: "string", description: "Max 12 words." },
+              why: { type: "string", description: "Max 50 words citing the Qloo numbers (local rank vs national rank, local_pct, segment_fit, trend, near_venue_index, overlap)." },
               sponsor_picks: {
                 type: "array",
                 items: {
                   type: "object",
-                  properties: { brand_id: { type: "string" }, angle: { type: "string" } },
+                  properties: { brand_id: { type: "string" }, angle: { type: "string", description: "One sentence, max 25 words." } },
                   required: ["brand_id", "angle"],
                 },
               },
-              giveaway: { type: "string" },
-              activations: { type: "array", items: { type: "string" } },
+              giveaway: { type: "string", description: "Max 15 words." },
+              activations: { type: "array", items: { type: "string", description: "Max 18 words." }, description: "Exactly 3." },
               playlist_artist_ids: { type: "array", items: { type: "string" } },
               local_partner_picks: {
                 type: "array",
                 items: {
                   type: "object",
-                  properties: { place_id: { type: "string" }, idea: { type: "string" } },
+                  properties: { place_id: { type: "string" }, idea: { type: "string", description: "Max 15 words." } },
                   required: ["place_id", "idea"],
                 },
               },
               media_partner: {
                 type: "object",
-                properties: { podcast_id: { type: "string" }, idea: { type: "string" } },
+                properties: { podcast_id: { type: "string" }, idea: { type: "string", description: "Max 15 words." } },
                 required: ["podcast_id", "idea"],
               },
               promo: {
                 type: "object",
                 properties: {
                   headline: { type: "string" },
-                  social: { type: "string", description: "One social post, under 280 characters." },
+                  social: { type: "string", description: "One social post, max 200 characters." },
                   email_subject: { type: "string" },
                 },
                 required: ["headline", "social", "email_subject"],
@@ -376,6 +369,14 @@ const submitTool: ToolDef<PlanSubmissionT> = {
   schema: PlanSubmission,
   label: (a) => `Submitting ${a.nights.length} theme nights for validation`,
   async execute(args, run) {
+    // Every anchor gets the full profile (heatmap, trend, demographics) and scoring before validation,
+    // so night cards and the control group are measured the same way.
+    const anchors = args.nights.map((n) => resolveId(run, n.anchor_entity_id)).filter((id): id is string => Boolean(id));
+    const segments = [...new Set(run.targets.map((t) => t.segment))];
+    const unscored = anchors.filter((id) => !run.taste.segmentFit.has(id));
+    if (unscored.length) await scoreCandidates(run.taste, unscored, segments);
+    const unprofiled = anchors.filter((id) => !run.taste.profiles.has(id));
+    if (unprofiled.length) await profileEntities(run.taste, unprofiled);
     const { plan, errors, warnings } = assemblePlan(run, args);
     if (!plan) {
       return { output: { accepted: false, errors }, summary: `Plan rejected: ${errors.join("; ")}` };
@@ -412,6 +413,10 @@ export async function runTool(name: string, rawArgs: unknown, callId: string, ru
   run.emit({ type: "tool_call", callId, name, label: tool.label(parsed.data as never), args: parsed.data as Record<string, unknown> });
   try {
     const outcome = await toolCallScope.run(callId, () => tool.execute(parsed.data as never, run));
+    if (name === "find_sponsors" || name === "build_night_experience") {
+      const anchor = resolveId(run, (parsed.data as { anchor_entity_ids: string[] }).anchor_entity_ids[0]);
+      if (anchor) run.kits.set(anchor, { ...run.kits.get(anchor), [name === "find_sponsors" ? "sponsors" : "experience"]: outcome.output });
+    }
     run.emit({ type: "tool_result", callId, name, ok: true, summary: outcome.summary, ui: outcome.ui });
     return outcome.output;
   } catch (error) {
