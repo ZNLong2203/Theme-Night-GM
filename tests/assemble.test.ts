@@ -6,6 +6,8 @@ import { TasteContext } from "@/lib/qloo/workflows";
 import { computeScore } from "@/lib/scoring";
 import type { EntityCard, GameDate, TeamConfig } from "@/lib/types";
 
+const RUN_ID = "3d63e9ef-0016-4d4f-adad-2ee3dd6bc29a";
+
 const VENUE = { name: "Downtown ballpark, Durham", city: "Durham, North Carolina", lat: 35.9916, lon: -78.9045 };
 
 const SANDLOT: EntityCard = { id: "M-SANDLOT", name: "The Sandlot", kind: "movie", owners: ["Island World"] };
@@ -57,6 +59,7 @@ function makeRun(): RunContext {
     sponsorCategories: ["Beverages"],
   };
   return {
+    id: RUN_ID,
     taste,
     team,
     targets: TARGETS.map((t) => ({ ...t })),
@@ -107,7 +110,7 @@ describe("assemblePlan", () => {
     expect(plan.team).toBe(run.team);
     expect(plan.mode).toEqual(run.mode);
     expect(plan.requests).toBe(run.taste.recorder.logs);
-    expect(plan.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(plan.id).toBe(RUN_ID);
 
     const [sandlot, moana] = plan.nights;
     expect(sandlot).toMatchObject({ weekday: "Tue", time: "night", segment: "families", title: "Sandlot Summer Night" });
