@@ -29,8 +29,9 @@ export const KIND_URN: Record<EntityKind, string> = {
 const URN_KIND = Object.fromEntries(Object.entries(KIND_URN).map(([k, v]) => [v, k])) as Record<string, EntityKind>;
 URN_KIND["urn:entity:video_game"] = "videogame";
 
-/** Qloo caps `take` at 50 on /v2/insights (heatmaps included). */
+/** Qloo caps `take` at 50 on /v2/insights. */
 const MAX_TAKE = 50;
+const HEAT_DISPLAY_CELLS = 300;
 /** Candidates are ranked against the city's top results for their domain, so every score comes from one query. */
 const POOL_SIZE = 25;
 
@@ -412,7 +413,12 @@ export async function profileEntities(ctx: TasteContext, ids: string[], catchmen
       const mean = (xs: typeof points) => (xs.length ? xs.reduce((s, p) => s + p.affinity, 0) / xs.length : 0);
       // 0.5 = the catchment looks like the metro average; 1 = twice as strong near the venue.
       const ratio = mean(points) > 0 ? mean(near) / mean(points) : 0;
-      heat = { points, nearVenueIndex: points.length ? round(Math.max(0, Math.min(1, ratio / 2))) : 0.5, catchmentKm };
+      // Heatmaps ignore `take` (LA returned 2,741 cells live). Score on every cell, ship the strongest 300.
+      const display = [...points]
+        .sort((a, b) => b.affinity - a.affinity)
+        .slice(0, HEAT_DISPLAY_CELLS)
+        .map((p) => ({ lat: round(p.lat, 4), lon: round(p.lon, 4), affinity: p.affinity }));
+      heat = { points: display, nearVenueIndex: points.length ? round(Math.max(0, Math.min(1, ratio / 2))) : 0.5, catchmentKm };
     }
 
     let tasteTags: string[] | undefined;
