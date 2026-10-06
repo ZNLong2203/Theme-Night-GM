@@ -18,7 +18,7 @@ export function SharedPlan({ plan }: { plan: SeasonPlan }) {
         </p>
         <div className="flex flex-wrap gap-2">
           <Link
-            href={`/studio?replay=${plan.id}`}
+            href={`/studio?replay=${plan.runId ?? plan.id}`}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line-strong px-3 text-xs font-semibold hover:border-amber/60 hover:text-amber"
           >
             <PlayCircle size={14} /> Replay how the GM built it

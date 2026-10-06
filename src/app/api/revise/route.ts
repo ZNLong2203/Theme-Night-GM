@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   });
   if ("response" in admission) return admission.response;
 
-  // Trust the stored plan over the client's copy; only a stored plan may be overwritten by a revision.
+  // Trust the stored plan over the client's copy. Only revisions of a stored plan are saved, under a new id.
   const stored = await kvGet<SeasonPlan>(`plan:${parsed.data.plan.id}`);
   const plan = stored ?? (parsed.data.plan as unknown as SeasonPlan);
   const encoder = new TextEncoder();

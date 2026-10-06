@@ -183,6 +183,10 @@ export interface SeasonPlan {
   baseline?: BaselineResult;
   /** "Ask the GM" changes applied after the original run. */
   revisions?: { at: string; request: string; summary: string; changedDates: string[] }[];
+  /** The plan this one was revised from; a revision is saved under a new id so shared links never change. */
+  revisedFrom?: string;
+  /** The agent run that built the original plan (its replay); revisions keep pointing at it. */
+  runId?: string;
 }
 
 export interface RunMode {

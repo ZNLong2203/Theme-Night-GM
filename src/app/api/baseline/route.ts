@@ -26,11 +26,12 @@ export async function POST(request: Request) {
   if ("response" in admission) return admission.response;
   try {
     const result = await runBaseline(parsed.data as TeamConfig, request.signal);
-    // Attach the control result to the stored plan so shared links show the comparison too.
+    // Attach the control result to the stored plan so shared links show the comparison too. First write
+    // wins: a later run (from anyone holding the link) can't replace the comparison readers already saw.
     const planId = new URL(request.url).searchParams.get("planId");
     if (planId && /^[0-9a-f-]{36}$/.test(planId)) {
       const plan = await kvGet<SeasonPlan>(`plan:${planId}`);
-      if (plan && plan.team.venue.city === parsed.data.venue.city) await kvSet(`plan:${planId}`, { ...plan, baseline: result }, 90 * DAY);
+      if (plan && !plan.baseline && plan.team.venue.city === parsed.data.venue.city) await kvSet(`plan:${planId}`, { ...plan, baseline: result }, 90 * DAY);
     }
     return Response.json(result);
   } catch (error) {

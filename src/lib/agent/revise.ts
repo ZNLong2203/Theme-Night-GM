@@ -45,7 +45,7 @@ function seedTaste(ctx: TasteContext, plan: SeasonPlan) {
   }
 }
 
-function submitRevisionTool(base: SeasonPlan, request: string): ToolDef<RevisionSubmissionT> {
+function submitRevisionTool(base: SeasonPlan, request: string, revisedId: string): ToolDef<RevisionSubmissionT> {
   const submit = TOOLS.submit_season_plan.declaration.parametersJsonSchema as { properties: { nights: { items: { properties: object; required: string[] } } } };
   const nightSchema = structuredClone(submit.properties.nights.items);
   (nightSchema.properties as Record<string, unknown>).segment = {
@@ -91,6 +91,9 @@ function submitRevisionTool(base: SeasonPlan, request: string): ToolDef<Revision
       const profiles = new Map([...base.profiles, ...partial.profiles].map((p) => [p.entity.id, p]));
       const merged: SeasonPlan = {
         ...base,
+        id: revisedId,
+        revisedFrom: base.id,
+        runId: base.runId ?? base.id,
         nights: [...base.nights.filter((n) => !changed.has(n.date)), ...partial.nights].sort((a, b) => a.date.localeCompare(b.date)),
         profiles: [...profiles.values()].filter((p) => [...base.nights, ...partial.nights].some((n) => n.anchor.id === p.entity.id)),
         requests: [...base.requests, ...run.taste.recorder.logs],
@@ -137,7 +140,8 @@ export async function runRevision(
   if (mode.llm !== "gemini") {
     emit({ type: "message", text: "Revisions need the Gemini agent, and no GEMINI_API_KEY is configured on this server." });
   } else {
-    const submit = submitRevisionTool(base, request);
+    // Revisions fork: the revised plan gets its own id, so a shared link (or a featured plan) never changes under its readers.
+    const submit = submitRevisionTool(base, request, crypto.randomUUID());
     const registry: ToolRegistry = {
       ...Object.fromEntries(RESEARCH_TOOLS.map((name) => [name, TOOLS[name]])),
       submit_revision: submit as unknown as ToolDef<never>,
