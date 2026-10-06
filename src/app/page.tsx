@@ -12,7 +12,7 @@ const STEPS = [
   {
     n: "01",
     title: "Read the room",
-    body: "Asks Qloo what your city has the strongest affinity for across movies, TV, artists, games, podcasts and books, and where it over-indexes vs national popularity.",
+    body: "Asks Qloo what your city has the strongest affinity for across movies, TV, artists, video games and books, and where it over-indexes vs national popularity.",
     chips: ["/v2/insights", "signal.location.query", "filter.popularity.min", "bias.trends"],
   },
   {
@@ -296,8 +296,8 @@ export default async function Home() {
             <h3 className="font-display text-2xl font-bold uppercase">Aggregate taste, never people</h3>
             <ul className="mt-5 space-y-4 text-sm">
               {[
-                [Lock, "No personal data goes to Qloo.", "The agent sends team, city and venue only. Results are aggregate audience affinities."],
-                [Users, "No sensitive targeting.", "Segments are age and life stage only. The agent is instructed never to infer ethnicity, religion, health or politics."],
+                [Lock, "No personal data goes to Qloo.", "Qloo only sees market-level inputs: the city, venue coordinates, entity IDs and age or life-stage signals. Results are aggregate audience affinities."],
+                [Users, "No sensitive targeting.", "Segments are age and life stage only. The validator also blocks identity-framed nights, sensitive anchors, and alcohol or bars on family and Gen Z nights."],
                 [Receipt, "Every claim has a receipt.", "Each night lists the exact Qloo requests behind it, and you can copy any of them as curl."],
                 [ShieldCheck, "IP-aware.", "Studio and publisher metadata flags nights that need a license, and the license-free mode avoids them."],
                 [Database, "Can't cite made-up data.", "The plan validator rejects any entity ID that Qloo didn't return during the run."],

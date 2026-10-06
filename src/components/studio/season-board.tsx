@@ -32,7 +32,8 @@ export function SeasonBoard({ plan, onPlanChange }: { plan: SeasonPlan; onPlanCh
   const [open, setOpen] = useState<Night | null>(null);
   const avg = Math.round(plan.nights.reduce((s, n) => s + n.score.total, 0) / plan.nights.length);
   const sponsors = new Set(plan.nights.flatMap((n) => n.sponsors.map((s) => s.brand.id)));
-  const live = plan.requests.filter((r) => !r.cached).length;
+  const fresh = plan.requests.filter((r) => !r.cached).length;
+  const source = plan.mode.qloo === "live" ? "live" : "simulated";
   const revised = new Set(plan.revisions?.at(-1)?.changedDates ?? []);
 
   return (
@@ -58,7 +59,7 @@ export function SeasonBoard({ plan, onPlanChange }: { plan: SeasonPlan; onPlanCh
           <Kpi label="Theme nights" value={plan.nights.length} />
           <Kpi label="Avg Taste Fit" value={avg} suffix="/100" />
           <Kpi label="Sponsor prospects" value={sponsors.size} />
-          <Kpi label="Qloo requests as evidence" value={plan.requests.length} hint={`${live} live · ${plan.requests.length - live} cached`} />
+          <Kpi label="Qloo requests as evidence" value={plan.requests.length} hint={`${fresh} ${source} · ${plan.requests.length - fresh} cached`} />
         </div>
       </Card>
 
