@@ -167,7 +167,7 @@ An Ask the GM revision (`POST /api/revise`) follows the same sequence with `runR
 | [src/app/api/status/route.ts](../src/app/api/status/route.ts) | Returns `runMode()` (`qloo`, `llm`, `model`, `store`). No secrets. |
 | [src/app/api/presets/route.ts](../src/app/api/presets/route.ts) | Preset slugs, or a generated `TeamConfig` for `?slug=`. |
 | [src/lib/rate-limit.ts](../src/lib/rate-limit.ts) | `clientKey` (first `x-forwarded-for` entry, else `x-real-ip`, else `"local"`), `checkRate` (sliding 10-minute window), `acquireSlot`, `admit` (slot first, then quota), `readJson` (body cap), `tooMany` (429 + `Retry-After`). In-memory, per instance. |
-| [src/lib/store.ts](../src/lib/store.ts) | `kvGet` / `kvSet` with TTL. Three backends: Upstash over REST (`KV_REST_API_URL` + `KV_REST_API_TOKEN`, or the `UPSTASH_REDIS_REST_*` pair), any Redis over TCP (`REDIS_URL`, via `node-redis`, one connection per instance), otherwise a per-process map (500 keys max). Remote values are gzipped. A store outage returns `null`/`false` and never breaks a run. |
+| [src/lib/store.ts](../src/lib/store.ts) | `kvGet` / `kvSet` with TTL. Three backends: Upstash over REST (`KV_REST_API_URL` + `KV_REST_API_TOKEN`, or the `UPSTASH_REDIS_REST_*` pair), any Redis over TCP (`REDIS_URL`, via `node-redis`, one connection per instance), otherwise a per-process map (200 keys max). Remote values are brotli-compressed. If Redis fails or hangs (2.5 s timeouts), a breaker skips it for 30 s and memory serves; if it is full, the Qloo cache and then old run logs are purged and the write retried; anything Redis can't take stays in the instance's memory. Plans and featured pointers are never purged. |
 | [src/lib/errors.ts](../src/lib/errors.ts) | `publicError`: logs the full error server-side and returns a visitor-safe message (Qloo failures show only their status). |
 | [src/lib/agent/run.ts](../src/lib/agent/run.ts) | `runAgent` (orchestration, safety net, persistence), `geminiLoop` (shared with revisions), `runDeadline`, `runMode`, `GEMINI_MODEL`, `MAX_STEPS`, `LLM_DEADLINE_MS`, `RUN_DEADLINE_MS`, the planning-run Qloo budget and calls-per-turn cap. |
 | [src/lib/agent/revise.ts](../src/lib/agent/revise.ts) | `runRevision`: seeds a `TasteContext` from the plan, runs the loop with the research tools plus `submit_revision`, validates and merges changed nights, records the revision. |
@@ -181,7 +181,7 @@ An Ask the GM revision (`POST /api/revise`) follows the same sequence with `runR
 | [src/lib/qloo/workflows.ts](../src/lib/qloo/workflows.ts) | `TasteContext` (per-run memory) and the Qloo workflows: `scanMarket`, `profileEntities`, `scoreCandidates`, `scoreIn`, `nearVenueIndex`, `crossoverTags`, `findSponsors`, `buildExperience`, `searchEntities`, plus `toCard`, `summarizeTrend` and `km`. The only module that calls `qlooGet`. |
 | [src/lib/qloo/mock.ts](../src/lib/qloo/mock.ts), [mock-data.ts](../src/lib/qloo/mock-data.ts) | Deterministic, hash-seeded stand-in for the endpoints above, used only when `QLOO_API_KEY` is unset ([QLOO_INTEGRATION.md §10](QLOO_INTEGRATION.md#10-simulated-mode)). |
 | [src/lib/market-dna.ts](../src/lib/market-dna.ts) | `compareMarkets` / `compareDomain`: shared picks, Jaccard, unique picks and leans for two markets' top lists. Pure functions shared by the route and the page. |
-| [src/lib/featured.ts](../src/lib/featured.ts) | `featuredPlans`: the latest live plan per demo preset, from the store. |
+| [src/lib/featured.ts](../src/lib/featured.ts) | `featuredPlans`, `loadPlan`, `loadRun`: the curated recorded run per demo preset (`data/featured/<slug>.json`, shipped with the deployment, not committed) wins, then the store. Plan and run lookups try the store first and fall back to the recordings. |
 | [src/lib/types.ts](../src/lib/types.ts) | Shared server/client types: `TeamConfig`, `EntityCard`, `Night`, `SeasonPlan`, `ScoreBreakdown`, `QlooRequestLog`, `AgentEvent`, `ToolUIData`, `BaselineResult`, `RunMode`. |
 | [src/lib/scoring.ts](../src/lib/scoring.ts) | `SCORE_WEIGHTS`, `SCORE_LABELS`, `computeScore` (Taste Fit Score, with `estimated` components). |
 | [src/lib/schedule.ts](../src/lib/schedule.ts) | `SEGMENTS`, `SPORTS`, `generateSchedule` (synthetic home schedules), `weekdayOf`, `weaknessScore`, `pickWeakDates`, `defaultSegment`. |
@@ -307,7 +307,7 @@ The full check table is in [AGENT.md §6](AGENT.md#6-plan-validator). The Taste 
 | Entities per tool | profile ≤ 6, fit ≤ 14, sponsors/experience anchors ≤ 3, compare ≤ 5 per side (extra IDs are silently sliced off), search `take` 5; the scan sends the top 10 per domain to the model | [tools.ts](../src/lib/agent/tools.ts) |
 | Qloo per request | `take` ≤ 50, 20 s per attempt, ≤ 3 attempts, `Retry-After` honoured up to 5 s, 10 in flight, 200 ms between starts | [client.ts](../src/lib/qloo/client.ts) |
 | Geocode | Same-origin only; ≤ 1 Nominatim request per second per instance (a queue longer than 5 s gets 429); 8 s timeout; query 2–120 chars | [geocode/route.ts](../src/app/api/geocode/route.ts) |
-| Storage | Plans and run logs kept 90 days; run logs over 3 MB (before compression) aren't stored; remote values gzipped; memory store ≤ 500 keys; Redis connects and commands time out after 5 s | [run.ts](../src/lib/agent/run.ts), [store.ts](../src/lib/store.ts) |
+| Storage | Plans and run logs kept 90 days; run logs over 3 MB (before compression) aren't stored; remote values brotli-compressed; memory store ≤ 200 keys; Redis connects and commands time out after 2.5 s, then a 30 s breaker; on OOM the Qloo cache, then run logs, are purged | [run.ts](../src/lib/agent/run.ts), [store.ts](../src/lib/store.ts) |
 | Heatmap cells | The index uses every cell Qloo returns; the strongest 300 are sent to the UI | [workflows.ts](../src/lib/qloo/workflows.ts) |
 | Saved plans per browser | 12 | [use-agent-run.ts](../src/lib/use-agent-run.ts) |
 
@@ -340,18 +340,18 @@ The route runs `scanMarket` for both cities in parallel (five domains, top 25 ea
 
 ## 11. Storage, sharing and replay
 
-[`store.ts`](../src/lib/store.ts) is a tiny key-value layer with three backends, picked from the environment: Upstash over its REST API (`KV_REST_API_URL` + `KV_REST_API_TOKEN`, or `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`), any Redis over TCP (`REDIS_URL`, which the Vercel Marketplace Redis integration sets; production uses this), or a map on `globalThis` (so pages and route handlers in one process share it). The REST pair wins if both are set. Remote values are gzipped JSON, so a 563 KB run log is stored as about 133 KB and a 30 MB free Redis tier holds a full demo season. `RunMode.store` reports `redis` or `memory`, and the Share button says "Share (temporary)" without Redis.
+[`store.ts`](../src/lib/store.ts) is a tiny key-value layer with three backends, picked from the environment: Upstash over its REST API (`KV_REST_API_URL` + `KV_REST_API_TOKEN`, or `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`), any Redis over TCP (`REDIS_URL`, which the Vercel Marketplace Redis integration sets; production uses this), or a map on `globalThis` (so pages and route handlers in one process share it). The REST pair wins if both are set. Remote values are brotli-compressed JSON, so a 647 KB run log is stored as about 85 KB and a 30 MB free Redis tier holds a full demo season. If Redis fails or hangs (2.5 s timeouts), a breaker skips it for 30 s and memory serves; if it is full, the Qloo cache and then old run logs are purged and the write retried; anything Redis can't take stays in the instance's memory. Plans and featured pointers are never purged. `RunMode.store` reports `redis` or `memory`, and the Share button says "Share (temporary)" without Redis.
 
 | Key | Written by | Read by | TTL |
 |---|---|---|---|
 | `plan:<id>` | `runAgent` after `done`; `runRevision` (stored plans only); `/api/baseline?planId=` (adds `baseline`) | `/plan/<id>`, `/api/plans/<id>`, `/api/revise` | 90 days |
 | `run:<id>` | `runAgent`, when the event log is ≤ 3 MB | `/api/runs/<id>` → Studio replay | 90 days |
 | `featured:<slug>` | `runAgent`, when the team matches a demo preset (name and city) and Qloo was live | `/api/featured`, landing page | 90 days |
-| `qloo:v1:<sha256>` | `qlooGet`, live mode only | `qlooGet` on any instance | 24 h |
+| `qloo:v1:<sha256>` | `qlooGet`, live mode only, responses ≤ 64 KB | `qlooGet` on any instance | 12 h |
 
 - **Shared plan** (`/plan/<id>`): a server page that renders the season board read-only (night drawers, exports, control group; no Ask the GM), every receipt, and a link to replay the run.
 - **Replay** (`/studio?replay=<run id>`, or `/studio?replay=1&preset=<slug>` for that preset's featured run): fetches the stored event log and replays it at 2× with paced delays. If no recording is found, the Studio starts a fresh run instead.
-- **Featured plans:** the landing page is rendered per request and lists the latest live plan per demo market ("Open plan" / "Replay the run"); **Watch it plan Durham** replays the featured Durham run when there is one, and otherwise starts a live Durham run.
+- **Featured plans:** the landing page is prerendered and refreshed every minute. Each demo market shows its curated recorded run from `data/featured/` (shipped inside the deployment, so it works even if Redis is full, flushed or down), or else the latest live preset run in the store ("Open plan" / "Replay the run"); **Watch it plan Durham** replays the featured Durham run, and otherwise starts a live Durham run.
 
 Without Redis these keys live in one instance's memory: links and replays work only while that instance stays warm, and other serverless instances don't see them.
 

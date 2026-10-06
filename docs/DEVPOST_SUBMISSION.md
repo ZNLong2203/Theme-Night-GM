@@ -35,7 +35,7 @@ After the plan:
 
 - **Ask the GM.** Ask why a night was picked, or ask for a change ("make Tuesday a families night", "find a beverage sponsor for every night"). The GM re-runs only the Qloo research it needs, resubmits only the nights it changed through the same validator, and marks them as revised.
 - **Run the LLM-only control.** The same model plans the same dates without Qloo. Qloo then fact-checks those picks and they are scored with the same formula. A pick Qloo can't find scores 0.
-- **Share and replay.** Every plan gets a read-only link with all its receipts, and any finished run can be replayed in seconds. The landing page shows the latest live plan for each demo market.
+- **Share and replay.** Every plan gets a read-only link with all its receipts, and any finished run can be replayed in seconds. The landing page shows a recorded live plan for each demo market, shipped with the deployment so it never depends on the store.
 - **Export.** The season exports as JSON or a calendar CSV, and each night kit prints as a sponsor one-pager.
 
 **Market DNA** compares any two cities side by side: their top 25 movies, TV shows, artists, video games and books from Qloo, what both share, what only one market ranks, and the picks that lean hardest to one city.
@@ -63,7 +63,7 @@ Ask the GM reuses the same loop with the research tools plus a `submit_revision`
 
 **Guardrails.** No personal data goes to Qloo. Requests carry the city, the venue's coordinates, entity IDs, search terms, sales-category phrases and age or life-stage signals; the team name, the director's notes and follow-up questions go only to Gemini. Results are presented as aggregate affinities, and the system prompt forbids inferring sensitive traits ([prompt.ts](https://github.com/ZNLong2203/Theme-Night-GM/blob/main/src/lib/agent/prompt.ts)). The validator enforces safety rules in code ([sensitivity.ts](https://github.com/ZNLong2203/Theme-Night-GM/blob/main/src/lib/sensitivity.ts), [assemble.ts](https://github.com/ZNLong2203/Theme-Night-GM/blob/main/src/lib/agent/assemble.ts)): anchors must be a movie, TV show, artist, video game or book; political, religious, crime or tragedy anchors and identity-framed nights are rejected; alcohol brands and bars or breweries are dropped from family and Gen Z nights. The autopilot follows the same rules. Without `QLOO_API_KEY` the app uses labelled simulated Qloo data. Per-client rate limits, concurrency slots, body-size caps and per-run Qloo budgets protect the public demo's quota.
 
-**Storage, tests and deployment.** Plans and run logs are stored gzipped in Redis for 90 days (server memory without Redis) for share links and replays. A Vitest suite covers scoring, the schedule, the safety rules, the workflows and the validator, plus a keyless end-to-end agent run; GitHub Actions runs lint, typecheck, tests and build on every push with no secrets. The app runs on Vercel.
+**Storage, tests and deployment.** Plans and run logs are stored brotli-compressed in Redis for 90 days (server memory without Redis) for share links and replays. A full, slow or unreachable Redis never fails a request: a breaker skips it, a full store drops its disposable cache first, and memory takes the rest. A Vitest suite covers scoring, the schedule, the safety rules, the workflows and the validator, plus a keyless end-to-end agent run; GitHub Actions runs lint, typecheck, tests and build on every push with no secrets. The app runs on Vercel.
 
 ## Challenges we ran into
 

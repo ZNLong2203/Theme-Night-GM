@@ -130,7 +130,9 @@ Vercel's limits depend on the plan and on fluid compute (on by default); check [
 
 **Why it matters.** Every finished run saves its plan (`/plan/<id>`), its event log (`/studio?replay=<id>`) and, for live demo-preset runs, the landing page's featured plan, for 90 days. Live Qloo responses up to 64 KB are also cached for 12 h so every instance can reuse them. Without Redis all of this lives in **one serverless instance's memory**: a shared link or replay works only while that instance is warm and only when the request reaches it, the landing page lists only featured plans made on the instance that serves it, revisions are saved server-side only on that instance, and the Share button reads **Share (temporary)**. With Redis, every instance sees the same plans and cache.
 
-[src/lib/store.ts](../src/lib/store.ts) supports any Redis over TCP (`REDIS_URL`) and Upstash over REST (`KV_REST_API_URL` + `KV_REST_API_TOKEN`). Values are gzipped before they are stored, so a 563 KB run log takes about 133 KB, and a 30 MB free tier holds a full demo season.
+[src/lib/store.ts](../src/lib/store.ts) supports any Redis over TCP (`REDIS_URL`) and Upstash over REST (`KV_REST_API_URL` + `KV_REST_API_TOKEN`). Values are brotli-compressed before they are stored, so a 647 KB run log takes about 85 KB, and a 30 MB free tier holds a full demo season. If Redis fails or hangs (2.5 s timeouts), a breaker skips it for 30 s and memory serves; if it is full, the Qloo cache and then old run logs are purged and the write retried; anything Redis can't take stays in the instance's memory. Plans and featured pointers are never purged. `/api/status` reports `storeHealthy: false` while the breaker is open.
+
+**Featured runs survive any store problem.** The landing page's four demo plans, with their control results and replays, are recorded in `data/featured/<slug>.json` and traced into the routes that read them (`outputFileTracingIncludes` in [next.config.ts](../next.config.ts)). The files hold Qloo API data, so they are gitignored and only uploaded by `vercel deploy`; a deployment without them falls back to the store.
 
 > **Production:** https://theme-night-gm.vercel.app uses the Vercel Marketplace Redis (free 30 MB) connected to the project through `REDIS_URL`; `/api/status` reports `"store":"redis"`.
 
@@ -143,7 +145,7 @@ Vercel's limits depend on the plan and on fluid compute (on by default); check [
 
 **Alternatives.** Any other Redis works the same way: set `REDIS_URL` to its connection string. For Upstash, either connect the Upstash integration from the Marketplace or create a database in the Upstash console, and set `KV_REST_API_URL` + `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`); the REST pair takes precedence if `REDIS_URL` is also set.
 
-Locally, `npx vercel env pull .env.local` copies the project's variables, Redis included. A Redis outage never breaks a run: connections and commands time out after 5 s, reads then return nothing and writes are skipped (and logged).
+Locally, `npx vercel env pull .env.local` copies the project's variables, Redis included. A Redis outage never breaks a run: connections and commands time out after 2.5 s, then a 30 s breaker skips Redis entirely, reads fall back to memory (and to the recorded featured runs) and writes go to memory (and are logged).
 
 ## 7. Post-deploy smoke test
 

@@ -45,7 +45,7 @@ Under the season board, **Ask the GM** takes a question ("Why did you pick this 
 
 ### Share, replay, featured plans
 
-Every finished run saves its plan and its event log for 90 days. **Share link** opens the plan read-only at `/plan/<id>`, and `/studio?replay=<id>` replays how the GM built it in seconds, with no new API spend. The landing page links the latest live plan for each demo market. Plans and logs are stored gzipped in Redis when one is configured (any Redis via `REDIS_URL`, which the Vercel Marketplace integration sets, or Upstash's REST API), and in server memory otherwise ([`src/lib/store.ts`](src/lib/store.ts)).
+Every finished run saves its plan and its event log for 90 days. **Share link** opens the plan read-only at `/plan/<id>`, and `/studio?replay=<id>` replays how the GM built it in seconds, with no new API spend. The landing page links a recorded live plan for each demo market, shipped with the deployment so it works even if Redis is down. Plans and logs are stored brotli-compressed in Redis when one is configured (any Redis via `REDIS_URL`, which the Vercel Marketplace integration sets, or Upstash's REST API), and in server memory otherwise ([`src/lib/store.ts`](src/lib/store.ts)).
 
 ### Market DNA
 

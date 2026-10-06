@@ -38,7 +38,7 @@ If anything stalls, use the [fallback plan](#fallback-plan).
 ## Before you go on (pre-flight)
 
 - [ ] https://theme-night-gm.vercel.app loads. The **header badges** read **Qloo live** and **gemini-3.8-flash**, and `curl -s https://theme-night-gm.vercel.app/api/status` includes `"store":"redis"`. (Badges come from [`/api/status`](../src/app/api/status/route.ts) → `runMode()`; they are hidden below 640 px width.)
-- [ ] The landing page shows **Durham** under **Finished plans from live runs**. If it doesn't, run `/studio?preset=durham-baseball&autorun=1` once and wait for the plan: a live preset run becomes that market's featured plan ([AGENT.md §2](AGENT.md#2-control-flow-and-run-modes)).
+- [ ] The landing page shows **Durham** under **Finished plans from live runs**. The four featured runs ship inside the deployment (`data/featured/`), so they don't depend on Redis. Without those files, a live preset run (`/studio?preset=durham-baseball&autorun=1`) becomes that market's featured plan ([AGENT.md §2](AGENT.md#2-control-flow-and-run-modes)).
 - [ ] Open the tabs:
   - **Tab A:** the landing page `/`.
   - **Tab B:** `/studio?preset=portland-soccer` (setup, not started).
