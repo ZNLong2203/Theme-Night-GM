@@ -8,7 +8,8 @@ import { Card } from "@/components/ui";
 import type { SeasonPlan } from "@/lib/types";
 
 export function SharedPlan({ plan }: { plan: SeasonPlan }) {
-  const created = new Date(plan.createdAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  // A fixed time zone: the server renders in UTC, and a viewer's local zone would make hydration disagree.
+  const created = `${new Date(plan.createdAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" })} UTC`;
   return (
     <>
       <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3">
