@@ -69,7 +69,7 @@ export function SeasonBoard({ plan, onPlanChange }: { plan: SeasonPlan; onPlanCh
 
       {onPlanChange && <AskTheGm plan={plan} onPlanChange={onPlanChange} />}
 
-      <BaselineCompare key={plan.id} plan={plan} />
+      <BaselineCompare key={plan.id} plan={plan} onPlanChange={onPlanChange} />
 
       {open && <NightDetail night={open} plan={plan} onClose={() => setOpen(null)} />}
     </div>

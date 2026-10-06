@@ -1,7 +1,7 @@
 "use client";
 
 import { FlaskConical, Loader2, SearchX } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatDate, SEGMENTS } from "@/lib/schedule";
 import type { BaselineResult, SeasonPlan } from "@/lib/types";
 import { savePlan } from "@/lib/use-agent-run";
@@ -11,10 +11,15 @@ import { Badge, Button, Card, cn, EntityAvatar, ScoreRing } from "../ui";
  * The control group. Same dates, same model, no Qloo tools — then both plans are scored with the
  * same Qloo-backed formula so the difference Qloo makes is measured, not claimed.
  */
-export function BaselineCompare({ plan }: { plan: SeasonPlan }) {
+export function BaselineCompare({ plan, onPlanChange }: { plan: SeasonPlan; onPlanChange?: (plan: SeasonPlan) => void }) {
   const [result, setResult] = useState<BaselineResult | undefined>(plan.baseline);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  // The control takes a while; attach its result to the plan as it is then (an Ask-the-GM revision may have landed).
+  const latest = useRef(plan);
+  useEffect(() => {
+    latest.current = plan;
+  }, [plan]);
 
   async function run() {
     setLoading(true);
@@ -28,7 +33,10 @@ export function BaselineCompare({ plan }: { plan: SeasonPlan }) {
       const body = await res.json();
       if (!res.ok) throw new Error(Array.isArray(body.error) ? body.error.join(" ") : (body.error ?? "Control run failed"));
       setResult(body);
-      savePlan({ ...plan, baseline: body });
+      // Put it on the in-memory plan too, so it survives the board remounting and is in the JSON export.
+      const next = { ...latest.current, baseline: body };
+      if (onPlanChange) onPlanChange(next);
+      else savePlan(next);
     } catch (e) {
       setError((e as Error).message);
     } finally {

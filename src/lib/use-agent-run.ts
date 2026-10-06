@@ -126,7 +126,8 @@ function reducer(state: RunState, action: Action): RunState {
       elapsedMs: state.startedAt ? Date.now() - state.startedAt : undefined,
     };
   }
-  if (action.type === "replace_plan") return { ...state, plan: action.plan };
+  // Only the plan on screen may be replaced: a late result for another plan (or for the plan a new run cleared) is dropped.
+  if (action.type === "replace_plan") return state.plan?.id === action.plan.id ? { ...state, plan: action.plan } : state;
   if (action.type === "load") return { ...initial, status: "done", plan: action.plan, mode: action.plan.mode, requests: action.plan.requests, profiles: action.plan.profiles };
 
   const event = action.event;
