@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { runRevision } from "@/lib/agent/revise";
-import { checkRate, clientKey, tooMany } from "@/lib/rate-limit";
+import { admit } from "@/lib/rate-limit";
 import { kvGet } from "@/lib/store";
 import type { AgentEvent, SeasonPlan } from "@/lib/types";
 import { TeamSchema } from "@/lib/validation";
@@ -31,8 +31,14 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`) }, { status: 400 });
   }
-  const rate = checkRate(`revise:${clientKey(request)}`, Number(process.env.REVISIONS_PER_10_MIN ?? 12));
-  if (!rate.ok) return tooMany("You've hit the demo limit for revisions. Try again in a few minutes.", rate.retryAfter);
+  const admission = admit(request, {
+    scope: "revise",
+    perClient: Number(process.env.REVISIONS_PER_10_MIN ?? 12),
+    maxConcurrent: Number(process.env.MAX_CONCURRENT_RUNS ?? 4),
+    busy: "The GM is busy with other teams right now. Try again in a minute.",
+    limited: "You've hit the demo limit for revisions. Try again in a few minutes.",
+  });
+  if ("response" in admission) return admission.response;
 
   // Trust the stored plan over the client's copy; only a stored plan may be overwritten by a revision.
   const stored = await kvGet<SeasonPlan>(`plan:${parsed.data.plan.id}`);
@@ -58,6 +64,7 @@ export async function POST(request: Request) {
         await runRevision(plan, parsed.data.message, send, request.signal, { persist: Boolean(stored) });
       } finally {
         clearInterval(heartbeat);
+        admission.release();
         controller.close();
       }
     },

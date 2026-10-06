@@ -1,20 +1,23 @@
 import "server-only";
 import type { FunctionDeclaration } from "@google/genai";
 import { z } from "zod";
+import { publicError } from "@/lib/errors";
 import { QlooRecorder } from "@/lib/qloo/client";
 import { profileEntities, scoreCandidates, TasteContext } from "@/lib/qloo/workflows";
 import { DAY, kvSet } from "@/lib/store";
 import type { AgentEvent, GameDate, SeasonPlan, SegmentId } from "@/lib/types";
 import { assemblePlan, PlanSubmission } from "./assemble";
 import { buildRevisionBrief, REVISION_PROMPT } from "./prompt";
-import { geminiLoop, runMode } from "./run";
-import { resolveId, TOOLS, type RunContext, type ToolDef, type ToolRegistry } from "./tools";
+import { geminiLoop, runDeadline, runMode, RUN_DEADLINE_MS } from "./run";
+import { missingFit, resolveId, TOOLS, type RunContext, type ToolDef, type ToolRegistry } from "./tools";
 
 const SEGMENT_IDS = ["families", "gen_z", "young_pros", "boomers"] as const;
 const RevisionNight = PlanSubmission.shape.nights.element.extend({ segment: z.enum(SEGMENT_IDS).optional() });
 const RevisionSubmission = z.object({ summary: z.string().min(1), nights: z.array(RevisionNight).min(1) });
 type RevisionSubmissionT = z.infer<typeof RevisionSubmission>;
 
+/** A revision touches a night or two; ~50 requests is typical. */
+const REVISION_QLOO_BUDGET = 120;
 const RESEARCH_TOOLS = ["search_entities", "scan_market_taste", "score_audience_fit", "profile_fandoms", "find_sponsors", "build_night_experience", "compare_fanbases"];
 
 /** Load everything the original run measured, so the plan's entities stay valid IDs for the model. */
@@ -76,7 +79,7 @@ function submitRevisionTool(base: SeasonPlan, request: string): ToolDef<Revision
       const targets: GameDate[] = args.nights.map((n) => ({ ...byDate.get(n.date)!, segment: (n.segment as SegmentId | undefined) ?? byDate.get(n.date)!.segment }));
       const anchors = args.nights.map((n) => resolveId(run, n.anchor_entity_id)).filter((id): id is string => Boolean(id));
       const segments = [...new Set(targets.map((t) => t.segment))];
-      const unscored = anchors.filter((id) => segments.some((s) => run.taste.segmentFit.get(id)?.[s] === undefined));
+      const unscored = missingFit(run, anchors, segments);
       if (unscored.length) await scoreCandidates(run.taste, unscored, segments);
       const unprofiled = anchors.filter((id) => !run.taste.profiles.has(id));
       if (unprofiled.length) await profileEntities(run.taste, unprofiled);
@@ -121,12 +124,13 @@ export async function runRevision(
     send(event);
   };
   const lastQ = Math.max(0, ...base.requests.map((r) => Number(r.id.slice(1)) || 0));
-  const recorder = new QlooRecorder((r) => emit({ type: "qloo_request", request: r }), lastQ);
+  const runSignal = runDeadline(signal, RUN_DEADLINE_MS);
+  const recorder = new QlooRecorder((r) => emit({ type: "qloo_request", request: r }), lastQ, { budget: REVISION_QLOO_BUDGET, signal: runSignal });
   const taste = new TasteContext(recorder, base.team.venue.city, base.team.venue, base.team.sport);
   seedTaste(taste, base);
   const targets: GameDate[] = base.nights.map((n) => ({ date: n.date, weekday: n.weekday, time: n.time, segment: n.segment, target: true }));
   const mode = runMode();
-  const run: RunContext = { id: base.id, taste, team: base.team, targets, mode, emit, kits: new Map() };
+  const run: RunContext = { id: base.id, taste, team: base.team, targets, mode, emit, kits: new Map(), signal: runSignal };
   let llmSteps = 0;
 
   emit({ type: "run_started", runId: base.id, mode, at: new Date().toISOString() });
@@ -139,7 +143,7 @@ export async function runRevision(
       submit_revision: submit as unknown as ToolDef<never>,
     };
     try {
-      llmSteps = await geminiLoop(run, started, signal, {
+      const loop = await geminiLoop(run, started, signal, {
         system: REVISION_PROMPT,
         brief: buildRevisionBrief(base, request),
         declarations: Object.values(registry).map((t) => t.declaration),
@@ -147,8 +151,10 @@ export async function runRevision(
         deadlineMs: 150_000,
         replyAfterSubmit: true,
       });
+      llmSteps = loop.steps;
+      if (loop.failure && !revised) emit({ type: "error", message: `The GM couldn't reach Gemini (${loop.failure}). Try again in a minute.` });
     } catch (error) {
-      emit({ type: "error", message: (error as Error).message ?? "Revision failed" });
+      emit({ type: "error", message: publicError(error, "The revision hit an unexpected error.") });
     }
   }
   // The model doesn't always add a closing line after submitting; fall back to its own summary.

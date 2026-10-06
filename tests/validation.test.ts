@@ -24,6 +24,14 @@ describe("TeamSchema", () => {
     }
   });
 
+  it("rejects impossible calendar dates and derives the weekday from the date", () => {
+    expect(check((t) => (t.dates[0].date = "2027-02-30"))).toBe("dates.0.date");
+    expect(check((t) => (t.dates[0].weekday = "x".repeat(13)))).toBe("dates.0.weekday");
+    const team = structuredClone(base());
+    team.dates[0] = { ...team.dates[0], date: "2027-04-06", weekday: "Someday" };
+    expect(TeamSchema.parse(team).dates[0].weekday).toBe("Tue");
+  });
+
   it("rejects out-of-range or non-numeric venue coordinates", () => {
     expect(check((t) => (t.venue.lat = 90.5))).toBe("venue.lat");
     expect(check((t) => (t.venue.lat = -91))).toBe("venue.lat");
@@ -51,7 +59,7 @@ describe("TeamSchema", () => {
     expect(check((t) => (t.teamName = "x".repeat(81)))).toBe("teamName");
     expect(check((t) => (t.venue.city = "D"))).toBe("venue.city");
     expect(check((t) => (t.dates = Array.from({ length: 121 }, () => t.dates[0])))).toBe("dates");
-    expect(check((t) => (t.sponsorCategories = Array.from({ length: 9 }, (_, i) => `Category ${i}`)))).toBe("sponsorCategories");
+    expect(check((t) => (t.sponsorCategories = Array.from({ length: 7 }, (_, i) => `Category ${i}`)))).toBe("sponsorCategories");
     expect(check((t) => (t.notes = "x".repeat(601)))).toBe("notes");
   });
 });

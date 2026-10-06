@@ -12,6 +12,8 @@ const sharedKey = (key: string) => `qloo:v1:${createHash("sha256").update(key).d
 const BASE_URL = process.env.QLOO_BASE_URL ?? "https://hackathon.api.qloo.com";
 const TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 2;
+/** Honour Retry-After up to this many seconds; a longer pause fails fast instead of stalling the run. */
+const MAX_RETRY_AFTER_S = 5;
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 // Live calls take 1–6 s each, so we overlap up to 10 while starting at most ~5 per second
 // (the rate other hackathon teams report as safe).
@@ -37,16 +39,39 @@ type Params = Record<string, string | number | boolean | undefined>;
 /** The agent tool call currently executing, so each Qloo request can be attributed to it. */
 export const toolCallScope = new AsyncLocalStorage<string>();
 
+export interface RecorderLimits {
+  /** Uncached Qloo requests this run may make; protects the shared key from a runaway (or prompt-injected) agent. */
+  budget?: number;
+  /** Aborts queued and in-flight requests when the client leaves or the run hits its deadline. */
+  signal?: AbortSignal;
+}
+
 /** Collects every request made during one agent run so the UI can show receipts. */
 export class QlooRecorder {
   private seq: number;
+  private spent = 0;
   readonly logs: QlooRequestLog[] = [];
   /** `startAt` lets a follow-up run (a revision) continue an existing plan's Q-numbering. */
   constructor(
     private readonly onLog?: (log: QlooRequestLog) => void,
     startAt = 0,
+    readonly limits: RecorderLimits = {},
   ) {
     this.seq = startAt;
+  }
+
+  get signal() {
+    return this.limits.signal;
+  }
+
+  /** Throws once the run is cancelled; `fresh` also charges one request against the budget. */
+  guard(fresh: boolean) {
+    if (this.limits.signal?.aborted) throw new QlooError("Run stopped before this Qloo request", 499, false);
+    if (!fresh) return;
+    if (this.limits.budget !== undefined && this.spent >= this.limits.budget) {
+      throw new QlooError(`This run has used its budget of ${this.limits.budget} Qloo requests`, 429, false);
+    }
+    this.spent += 1;
   }
 
   nextId() {
@@ -66,24 +91,30 @@ export class QlooRecorder {
 const cache = new Map<string, { at: number; body: unknown }>();
 let active = 0;
 let lastStart = 0;
+/** Set by a 429 so every run on the instance backs off together instead of burning its retries. */
+let pausedUntil = 0;
 const waiters: (() => void)[] = [];
 
 async function acquire() {
-  while (active >= MAX_CONCURRENT) {
-    await new Promise<void>((resolve) => waiters.push(resolve));
-  }
-  active += 1;
-  const wait = lastStart + MIN_INTERVAL_MS - Date.now();
-  lastStart = Math.max(Date.now(), lastStart + MIN_INTERVAL_MS);
-  if (wait > 0) await sleep(wait);
+  // A releasing request hands its slot straight to the oldest waiter, so nobody is starved.
+  if (active < MAX_CONCURRENT) active += 1;
+  else await new Promise<void>((resolve) => waiters.push(resolve));
+  const next = Math.max(Date.now(), lastStart + MIN_INTERVAL_MS, pausedUntil);
+  lastStart = next;
+  if (next > Date.now()) await sleep(next - Date.now());
 }
 
 function release() {
-  active -= 1;
-  waiters.shift()?.();
+  const next = waiters.shift();
+  if (next) next();
+  else active -= 1;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
+  });
 
 function normalize(params: Params): Record<string, string> {
   const out: Record<string, string> = {};
@@ -124,6 +155,7 @@ export async function qlooGet<T = unknown>(
   const started = Date.now();
   const live = qlooIsLive();
 
+  recorder.guard(false);
   let hit = cache.get(key);
   if (!(hit && Date.now() - hit.at < CACHE_TTL_MS) && live && storeKind() === "redis") {
     const shared = await kvGet<unknown>(sharedKey(key));
@@ -147,10 +179,11 @@ export async function qlooGet<T = unknown>(
     return { body: hit.body as T, requestId };
   }
 
+  recorder.guard(true);
   let body: unknown;
   let status = 200;
   try {
-    body = live ? await fetchWithRetry(key) : await mockQloo(path, query);
+    body = live ? await fetchWithRetry(key, recorder.signal) : await mockQloo(path, query);
   } catch (error) {
     status = error instanceof QlooError ? error.status : 500;
     recorder.push({
@@ -184,22 +217,30 @@ export async function qlooGet<T = unknown>(
   return { body: body as T, requestId };
 }
 
-async function fetchWithRetry(pathAndQuery: string): Promise<unknown> {
+const stopped = () => new QlooError("Run stopped before this Qloo request finished", 499, false);
+
+async function fetchWithRetry(pathAndQuery: string, signal?: AbortSignal): Promise<unknown> {
   let attempt = 0;
   for (;;) {
     await acquire();
+    if (signal?.aborted) {
+      release();
+      throw stopped();
+    }
     let response: Response;
     try {
+      const timeout = AbortSignal.timeout(TIMEOUT_MS);
       response = await fetch(`${BASE_URL}${pathAndQuery}`, {
         headers: { "X-Api-Key": process.env.QLOO_API_KEY ?? "", Accept: "application/json" },
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         cache: "no-store",
       });
     } catch (error) {
       release();
+      if (signal?.aborted) throw stopped();
       if (attempt < MAX_RETRIES) {
         attempt += 1;
-        await sleep(400 * 2 ** attempt);
+        await sleep(400 * 2 ** attempt, signal);
         continue;
       }
       throw new QlooError(`Qloo request failed: ${(error as Error).message}`, 504, true);
@@ -209,10 +250,13 @@ async function fetchWithRetry(pathAndQuery: string): Promise<unknown> {
     if (response.ok) return response.json();
 
     const retryable = response.status === 429 || response.status >= 500;
-    if (retryable && attempt < MAX_RETRIES) {
+    const retryAfter = Number(response.headers.get("retry-after"));
+    const pause = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** (attempt + 1);
+    if (response.status === 429) pausedUntil = Math.max(pausedUntil, Date.now() + Math.min(pause, MAX_RETRY_AFTER_S * 1000));
+    if (retryable && attempt < MAX_RETRIES && pause <= MAX_RETRY_AFTER_S * 1000 && !signal?.aborted) {
       attempt += 1;
-      const retryAfter = Number(response.headers.get("retry-after"));
-      await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt);
+      await sleep(pause, signal);
+      if (signal?.aborted) throw stopped();
       continue;
     }
     const text = await response.text().catch(() => "");

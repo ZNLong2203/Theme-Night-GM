@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { compareMarkets, DNA_DEPTH, DNA_KINDS, type MarketDnaResult, type MarketSide } from "@/lib/market-dna";
+import { publicError } from "@/lib/errors";
 import { QlooRecorder, qlooIsLive } from "@/lib/qloo/client";
 import { scanMarket, TasteContext } from "@/lib/qloo/workflows";
 import { checkRate, clientKey, tooMany } from "@/lib/rate-limit";
@@ -13,8 +14,9 @@ const QuerySchema = z
   .refine((q) => q.a.toLowerCase() !== q.b.toLowerCase(), { message: "Pick two different markets.", path: ["b"] });
 
 /** One market's top lists. Each side gets its own recorder so its receipts stay attributable to it. */
-async function scanCity(city: string) {
-  const recorder = new QlooRecorder();
+async function scanCity(city: string, signal: AbortSignal) {
+  // Five domains per city; the budget only guards against surprises.
+  const recorder = new QlooRecorder(undefined, 0, { budget: 15, signal });
   // scanMarket only sends the city as a location signal; venue coordinates are never used.
   const ctx = new TasteContext(recorder, city, { name: city, city, lat: 0, lon: 0 });
   const scan = await scanMarket(ctx, [...DNA_KINDS], DNA_DEPTH, 0.8);
@@ -50,13 +52,12 @@ export async function GET(request: Request) {
 
   const started = Date.now();
   try {
-    const [left, scannedRight] = await Promise.all([scanCity(parsed.data.a), scanCity(parsed.data.b)]);
+    const [left, scannedRight] = await Promise.all([scanCity(parsed.data.a, request.signal), scanCity(parsed.data.b, request.signal)]);
     const right = shiftIds(scannedRight.scan, scannedRight.logs, Math.max(0, ...left.logs.map((l) => seq(l.id))));
 
     for (const { scan } of [left, right]) {
       if (!scan.domains.length) {
-        const reason = scan.unavailable?.[0]?.reason;
-        return Response.json({ error: `Qloo returned no taste data for ${scan.city}${reason ? `: ${reason}` : "."}` }, { status: 502 });
+        return Response.json({ error: [`Qloo returned no taste data for ${scan.city}.`] }, { status: 502 });
       }
     }
 
@@ -70,6 +71,6 @@ export async function GET(request: Request) {
     };
     return Response.json(body);
   } catch (error) {
-    return Response.json({ error: (error as Error).message }, { status: 502 });
+    return Response.json({ error: [publicError(error, "The market comparison failed. Try again in a minute.")] }, { status: 502 });
   }
 }

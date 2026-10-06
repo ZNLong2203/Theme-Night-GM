@@ -239,6 +239,8 @@ export interface BaselineNight {
   anchorName: string;
   why: string;
   found: boolean;
+  /** The Qloo lookup itself failed, so "not found" says nothing about the pick (excluded from averages). */
+  lookupFailed?: boolean;
   match?: EntityCard;
   score?: ScoreBreakdown;
   evidence?: string[];

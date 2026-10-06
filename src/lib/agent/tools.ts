@@ -28,7 +28,13 @@ export interface RunContext {
   submitted?: boolean;
   /** Night kits the agent already built, keyed by anchor ID — reused if the safety net has to finish. */
   kits: Map<string, { sponsors?: unknown; experience?: unknown }>;
+  /** Client disconnect or run deadline; tools stop starting work once it fires. */
+  signal?: AbortSignal;
 }
+
+/** IDs that still lack a measured fit for at least one of the segments. */
+export const missingFit = (run: RunContext, ids: string[], segments: SegmentId[]) =>
+  ids.filter((id) => segments.some((s) => run.taste.segmentFit.get(id)?.[s] === undefined));
 
 export interface ToolOutcome {
   output: unknown;
@@ -261,8 +267,8 @@ const compareTool: ToolDef<{ a_entity_ids: string[]; b_entity_ids: string[] }> =
     parametersJsonSchema: {
       type: "object",
       properties: {
-        a_entity_ids: { type: "array", items: { type: "string" } },
-        b_entity_ids: { type: "array", items: { type: "string" } },
+        a_entity_ids: { type: "array", items: { type: "string" }, description: "Up to 5 IDs." },
+        b_entity_ids: { type: "array", items: { type: "string" }, description: "Up to 5 IDs." },
       },
       required: ["a_entity_ids", "b_entity_ids"],
     },
@@ -270,8 +276,8 @@ const compareTool: ToolDef<{ a_entity_ids: string[]; b_entity_ids: string[] }> =
   schema: z.object({ a_entity_ids: z.array(z.string()).min(1), b_entity_ids: z.array(z.string()).min(1) }),
   label: () => "Comparing two fan bases for crossover hooks",
   async execute(args, run) {
-    const a = ids(run, args.a_entity_ids);
-    const b = ids(run, args.b_entity_ids);
+    const a = ids(run, args.a_entity_ids).slice(0, 5);
+    const b = ids(run, args.b_entity_ids).slice(0, 5);
     const { tags, requestId } = await crossoverTags(run.taste, a, b);
     const name = (list: string[]) => list.map((id) => run.taste.cards.get(id)?.name ?? id).join(" + ");
     return {
@@ -375,7 +381,7 @@ const submitTool: ToolDef<PlanSubmissionT> = {
     // so night cards and the control group are measured the same way.
     const anchors = args.nights.map((n) => resolveId(run, n.anchor_entity_id)).filter((id): id is string => Boolean(id));
     const segments = [...new Set(run.targets.map((t) => t.segment))];
-    const unscored = anchors.filter((id) => !run.taste.segmentFit.has(id));
+    const unscored = missingFit(run, anchors, segments);
     if (unscored.length) await scoreCandidates(run.taste, unscored, segments);
     const unprofiled = anchors.filter((id) => !run.taste.profiles.has(id));
     if (unprofiled.length) await profileEntities(run.taste, unprofiled);
@@ -413,6 +419,7 @@ export async function runTool(
 ): Promise<unknown> {
   const tool = registry[name];
   if (!tool) return { error: `Unknown tool ${name}` };
+  if (run.signal?.aborted) return { error: "Run stopped" };
   const parsed = tool.schema.safeParse(rawArgs ?? {});
   if (!parsed.success) {
     const message = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");

@@ -5,7 +5,12 @@ import { QlooRecorder } from "@/lib/qloo/client";
 import { profileEntities, scoreCandidates, scoreIn, searchEntities, TasteContext } from "@/lib/qloo/workflows";
 import { SEGMENTS, SPORTS } from "@/lib/schedule";
 import type { BaselineNight, BaselineResult, EntityKind, TeamConfig } from "@/lib/types";
-import { GEMINI_MODEL, runMode } from "./run";
+import { GEMINI_MODEL, runDeadline, runMode } from "./run";
+
+/** The control resolves and scores at most 8 picks; ~60 requests is typical. */
+const BASELINE_QLOO_BUDGET = 100;
+/** Inside the route's 120 s maxDuration. */
+const BASELINE_DEADLINE_MS = 110_000;
 
 const KINDS = ["movie", "tv_show", "artist", "videogame", "podcast", "book"] as const;
 
@@ -37,13 +42,14 @@ const GENERIC_FALLBACK = [
  * The control group: ask the same LLM to plan the same dates with no tools, then fact-check its
  * picks with Qloo using exactly the same scoring as the agent's plan.
  */
-export async function runBaseline(team: TeamConfig): Promise<BaselineResult> {
+export async function runBaseline(team: TeamConfig, signal?: AbortSignal): Promise<BaselineResult> {
   const targets = team.dates.filter((d) => d.target).sort((a, b) => a.date.localeCompare(b.date));
   const mode = runMode();
+  const runSignal = runDeadline(signal, BASELINE_DEADLINE_MS);
   let proposals: z.infer<typeof BaselineSchema>["nights"];
 
   if (mode.llm === "gemini") {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { retryOptions: { attempts: 3, initialDelay: 1, maxDelay: 8 } } });
     const prompt = `You are a promotions strategist for ${team.teamName}, a ${SPORTS[team.sport].label.toLowerCase()} team (${team.league}) playing at ${team.venue.name} in ${team.venue.city}.
 Plan one theme night for each of these weak home dates. Anchor each night on one real, specific movie, TV show, music artist, video game, podcast or book that you believe fans in ${team.venue.city} love.
 ${targets.map((t) => `- ${t.date} (${t.weekday} ${t.time}) for ${SEGMENTS[t.segment].label} (${SEGMENTS[t.segment].short})`).join("\n")}
@@ -58,10 +64,11 @@ Return JSON only.`;
           properties: {
             nights: {
               type: "array",
+              maxItems: targets.length,
               items: {
                 type: "object",
                 properties: {
-                  date: { type: "string" },
+                  date: { type: "string", enum: targets.map((t) => t.date) },
                   title: { type: "string" },
                   anchor_name: { type: "string", description: "Exact title or artist name" },
                   anchor_kind: { type: "string", enum: [...KINDS] },
@@ -74,9 +81,15 @@ Return JSON only.`;
           required: ["nights"],
         },
         thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        abortSignal: runSignal,
       },
     });
-    proposals = BaselineSchema.parse(JSON.parse(response.text ?? "{}")).nights;
+    const raw = BaselineSchema.parse(JSON.parse(response.text ?? "{}")).nights;
+    // One pick per target date, whatever the model returned; an unknown date falls back to list order.
+    proposals = targets.flatMap((t, i) => {
+      const pick = raw.find((p) => p.date === t.date) ?? raw.filter((p) => !targets.some((x) => x.date === p.date))[i];
+      return pick ? [{ ...pick, date: t.date }] : [];
+    });
   } else {
     proposals = targets.map((t, i) => {
       const [title, anchor, kind] = GENERIC_FALLBACK[i % GENERIC_FALLBACK.length];
@@ -85,12 +98,18 @@ Return JSON only.`;
   }
 
   // Fact-check with Qloo: resolve each pick, then score it exactly like the agent's picks.
-  const recorder = new QlooRecorder();
+  const recorder = new QlooRecorder(undefined, 0, { budget: BASELINE_QLOO_BUDGET, signal: runSignal });
   const taste = new TasteContext(recorder, team.venue.city, team.venue, team.sport);
+  // A failed lookup is retried once, and if it still fails it is reported as such, not as "not in Qloo".
+  const lookup = (p: (typeof proposals)[number]) => searchEntities(taste, p.anchor_name, [p.anchor_kind as EntityKind], 1);
   const matches = await Promise.all(
     proposals.map(async (p) => {
-      const found = await searchEntities(taste, p.anchor_name, [p.anchor_kind as EntityKind], 1).catch(() => []);
-      return { proposal: p, match: found[0] };
+      try {
+        const found = await lookup(p).catch(() => lookup(p));
+        return { proposal: p, match: found[0], failed: false };
+      } catch {
+        return { proposal: p, match: undefined, failed: true };
+      }
     }),
   );
   const ids = [...new Set(matches.flatMap((m) => (m.match ? [m.match.id] : [])))];
@@ -110,7 +129,7 @@ Return JSON only.`;
       anchorName: m?.proposal.anchor_name ?? "",
       why: m?.proposal.why ?? "",
     };
-    if (!m?.match) return { ...base, found: false };
+    if (!m?.match) return { ...base, found: false, ...(m?.failed ? { lookupFailed: true } : {}) };
     const card = taste.cards.get(m.match.id) ?? m.match;
     return {
       ...base,
