@@ -46,7 +46,9 @@ export function Studio() {
             setTeam(planEvent.plan.team);
             setRunTeam(planEvent.plan.team);
           }
-          replay(events, 2);
+          // ?speed= slows or speeds playback (0.25–4×, default 2×), e.g. for screen recordings.
+          const speed = Math.min(4, Math.max(0.25, Number(params.get("speed")) || 2));
+          replay(events, speed);
         })
         .catch(() => start(team));
     } else if (params.get("autorun")) {
