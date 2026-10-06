@@ -1,5 +1,4 @@
-import { kvGet } from "@/lib/store";
-import type { AgentEvent } from "@/lib/types";
+import { loadRun } from "@/lib/featured";
 
 const ID = /^[0-9a-f-]{36}$/;
 
@@ -7,6 +6,6 @@ const ID = /^[0-9a-f-]{36}$/;
 export async function GET(_request: Request, ctx: RouteContext<"/api/runs/[id]">) {
   const { id } = await ctx.params;
   if (!ID.test(id)) return Response.json({ error: "Invalid run id" }, { status: 400 });
-  const events = await kvGet<AgentEvent[]>(`run:${id}`);
+  const events = await loadRun(id);
   return events ? Response.json(events) : Response.json({ error: "Run not found or expired" }, { status: 404 });
 }

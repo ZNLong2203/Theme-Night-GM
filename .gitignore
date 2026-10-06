@@ -49,3 +49,6 @@ next-env.d.ts
 
 # personal submission kit: scripts, gallery, notes (never pushed or deployed)
 /private/
+
+# recorded featured runs: bundled into deployments as a fallback, not committed (they hold Qloo API data)
+/data/

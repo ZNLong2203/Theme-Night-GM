@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
-import { kvGet } from "@/lib/store";
-import type { SeasonPlan } from "@/lib/types";
+import { loadPlan as loadStoredPlan } from "@/lib/featured";
 import { SharedPlan } from "./shared-plan";
 
 const ID = /^[0-9a-f-]{36}$/;
 
 async function loadPlan(id: string) {
-  return ID.test(id) ? kvGet<SeasonPlan>(`plan:${id}`) : null;
+  return ID.test(id) ? loadStoredPlan(id) : null;
 }
 
 export async function generateMetadata(props: PageProps<"/plan/[id]">): Promise<Metadata> {
