@@ -224,7 +224,7 @@ export default async function Home() {
           <div className="mx-auto max-w-7xl px-4 py-16">
             <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-amber">How the agent works</div>
             <h2 className="max-w-3xl font-display text-3xl font-bold uppercase tracking-wide md:text-4xl">
-              Eight tools, about 90–110 Qloo requests, one season plan.
+              Eight tools, roughly 100 Qloo requests, one season plan.
             </h2>
             <p className="mt-3 max-w-3xl text-muted">
               A Gemini 3.8 Flash agent plans and calls tools. Each tool is a Qloo workflow that bundles the requests needed to answer one question
