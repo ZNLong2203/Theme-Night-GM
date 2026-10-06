@@ -17,6 +17,8 @@ export function Studio() {
   const params = useSearchParams();
   const preset = PRESETS.find((p) => p.slug === params.get("preset")) ?? PRESETS[0];
   const [team, setTeam] = useState<TeamConfig>(() => teamFromPreset(preset));
+  // The team the current run was started for; the setup form stays editable while the run view is shown.
+  const [runTeam, setRunTeam] = useState<TeamConfig>(team);
   const [view, setView] = useState<"setup" | "run">(() => (params.get("autorun") || params.get("replay") ? "run" : "setup"));
   const recent = useSavedPlans();
   const { state, start, replay, stop, load, setPlan } = useAgentRun();
@@ -40,7 +42,10 @@ export function Studio() {
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error("run expired"))))
         .then((events: AgentEvent[]) => {
           const planEvent = events.find((e) => e.type === "plan");
-          if (planEvent?.type === "plan") setTeam(planEvent.plan.team);
+          if (planEvent?.type === "plan") {
+            setTeam(planEvent.plan.team);
+            setRunTeam(planEvent.plan.team);
+          }
           replay(events, 2);
         })
         .catch(() => start(team));
@@ -62,11 +67,13 @@ export function Studio() {
 
   const run = () => {
     setView("run");
+    setRunTeam(team);
     start(team);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const running = state.status === "running";
+  const shownTeam = state.plan?.team ?? runTeam;
   const elapsed = state.elapsedMs ?? (state.startedAt ? now - state.startedAt : 0);
 
   return (
@@ -118,9 +125,9 @@ export function Studio() {
                   <ArrowLeft size={14} /> Setup
                 </Button>
                 <div>
-                  <div className="font-display text-xl font-bold uppercase tracking-wide">{team.teamName}</div>
+                  <div className="font-display text-xl font-bold uppercase tracking-wide">{shownTeam.teamName}</div>
                   <div className="text-xs text-muted">
-                    {team.venue.city} · {team.dates.filter((d) => d.target).length} target dates
+                    {shownTeam.venue.city} · {shownTeam.dates.filter((d) => d.target).length} target dates
                   </div>
                 </div>
               </div>
@@ -160,7 +167,7 @@ export function Studio() {
                   </div>
                   <AgentTrace timeline={state.timeline} requests={state.requests} running={running} />
                 </Card>
-                <LiveCanvas state={state} venue={team.venue} />
+                <LiveCanvas state={state} venue={shownTeam.venue} />
               </div>
             </section>
           </>

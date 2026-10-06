@@ -1,7 +1,7 @@
 "use client";
 
 import { CalendarDays, Crosshair, Loader2, MapPin, Play, Sparkles, Wand2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { PRESETS, teamFromPreset } from "@/lib/presets";
 import { formatDate, generateSchedule, SEGMENTS, SPORTS, withTargets } from "@/lib/schedule";
 import type { GameDate, SegmentId, Sport, TeamConfig } from "@/lib/types";
@@ -31,7 +31,7 @@ export function TeamSetup({
   running,
 }: {
   team: TeamConfig;
-  onChange: (team: TeamConfig) => void;
+  onChange: Dispatch<SetStateAction<TeamConfig>>;
   onRun: () => void;
   running: boolean;
 }) {
@@ -57,12 +57,19 @@ export function TeamSetup({
   async function locate() {
     setLocating(true);
     setLocateError(undefined);
+    const { name, city } = team.venue;
     try {
-      const res = await fetch(`/api/geocode?q=${encodeURIComponent(team.venue.name ? `${team.venue.name}, ${team.venue.city}` : team.venue.city)}`);
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(name ? `${name}, ${city}` : city)}`);
       const body = await res.json();
-      const hit = body.results?.[0] ?? (await (await fetch(`/api/geocode?q=${encodeURIComponent(team.venue.city)}`)).json()).results?.[0];
+      const hit = body.results?.[0] ?? (await (await fetch(`/api/geocode?q=${encodeURIComponent(city)}`)).json()).results?.[0];
       if (!hit) throw new Error("No match — try a more specific city.");
-      set({ venue: { ...team.venue, lat: Number(hit.lat.toFixed(5)), lon: Number(hit.lon.toFixed(5)) } });
+      const lat = Number(hit.lat.toFixed(5));
+      const lon = Number(hit.lon.toFixed(5));
+      // Apply to the latest team so edits made during the lookup survive; skip it if the venue text it
+      // answers for has since changed.
+      onChange((current) =>
+        current.venue.name === name && current.venue.city === city ? { ...current, venue: { ...current.venue, lat, lon } } : current,
+      );
     } catch (error) {
       setLocateError((error as Error).message);
     } finally {
