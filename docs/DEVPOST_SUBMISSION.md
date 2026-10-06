@@ -78,7 +78,7 @@ Ask the GM reuses the same loop with the research tools plus a `submit_revision`
 
 ## Accomplishments that we're proud of
 
-- **It works live.** On the production deployment, the Nashville hockey preset planned 6 nights in 93 seconds with 98 Qloo requests, 0 errors and 6 Gemini steps. Other live preset runs took 110–132 seconds and 87–103 requests.
+- **It works live.** On the production deployment, the Nashville hockey preset planned 6 nights in 93 seconds with 98 Qloo requests, 0 errors and 6 Gemini steps. Live preset runs on production took 65–155 seconds and 84–138 Qloo requests.
 - **The control group is part of the product, so Qloo's effect is measured rather than claimed.** Across all four demo markets on the live deployment, the LLM-only plans averaged a Taste Fit of 41–45 and Theme Night GM's 68–74: **+28 points on average** (Durham 45 → 71, LA 44 → 73, Portland 44 → 74, Nashville 41 → 68), with every LLM pick found in Qloo, so none was scored 0 for being missing.
 - **Follow-ups are cheap.** An Ask the GM change to one night took about 100 seconds and 53 Qloo requests, and left the other nights untouched.
 - Every entity in a night kit, and every Taste Fit input that isn't flagged as estimated, traces back to a numbered Qloo request.
@@ -113,22 +113,19 @@ No login or API key needed. The public demo allows, per visitor and 10 minutes, 
 2. **Fastest look:** under *Finished plans from live runs*, click **Open plan** for a read-only plan with every receipt, or **Replay the run** to watch a recorded live run play back in seconds. **Watch it plan Durham** does the same for Durham.
 3. **A live run:** go to **Studio**, pick Durham, Los Angeles, Portland or Nashville under *Start from a demo market* (weak dates are pre-selected; click a date to toggle it), and press **Hire the GM — plan N theme nights**. A live 6-night run takes about 1.5–2 minutes. The **Agent trace** shows each Gemini step, the agent's thoughts and its tool calls; expand a step to see its Qloo requests. The tabs next to it (**Market**, **Fandoms**, **Audience fit**, **Night kits**) fill as results arrive.
 4. When the season board appears, click a night card. The kit shows the score breakdown (an **est.** tag marks anything Qloo couldn't measure), the heatmap, sponsor pitches (**Pitch** copies one), the playlist, partners, the licensing check and the Qloo requests cited for that night (**cited here** filter). **Sponsor one-pager** prints the kit.
-5. In **Ask the GM** under the night cards, ask a question (or click a suggestion), or request a change; a change takes a minute or two and marks the changed night **revised**. Changes are saved to the plan, so try them on a run you started.
+5. In **Ask the GM** under the night cards, ask a question (or click a suggestion), or request a change; a change takes a minute or two and marks the changed night **revised**. A change is saved as a new plan with its own link, so the featured plans stay as they are.
 6. Press **Run the LLM-only control** to compare average Taste Fit on the same dates without Qloo tools.
 7. Open the **Receipts** tab (under *How the GM built this plan*): filter every Qloo request by endpoint and copy any of them as `curl`; your key stays in `$QLOO_API_KEY`.
 8. Open **Market DNA** in the header and press **Compare markets** (or type any two cities).
 
 ## Why this only works with Qloo
 
-The brief says: "If your submission would work the same without Qloo, you're building the wrong thing." Theme Night GM has that test built in. The LLM-only control is the same Gemini model, on the same dates, at the same default thinking level, with no tools. Without Qloo, the model can only suggest what it already knows. It can't tell whether a city over-indexes on a fandom compared with national popularity, or where that audience concentrates around the venue. It also can't tell which age or life-stage crowd the fandom skews toward, whether interest is rising, which brands share the audience, or which places within 6 km that audience over-indexes on. In the agent's plan, every anchor, sponsor, playlist artist, partner and podcast is a Qloo entity, every score component comes from a Qloo response (or is flagged as estimated), and the validator rejects or drops any entity Qloo didn't return. On a live Durham run, the control's picks averaged a Taste Fit of 45 against the agent's 70. The gap uses our Qloo-derived score, so it shows how much better the agent's picks fit this market's Qloo signals; it is not a forecast of ticket sales.
+The brief says: "If your submission would work the same without Qloo, you're building the wrong thing." Theme Night GM has that test built in. The LLM-only control is the same Gemini model, on the same dates, at the same default thinking level, with no tools. Without Qloo, the model can only suggest what it already knows. It can't tell whether a city over-indexes on a fandom compared with national popularity, or where that audience concentrates around the venue. It also can't tell which age or life-stage crowd the fandom skews toward, whether interest is rising, which brands share the audience, or which places within 6 km that audience over-indexes on. In the agent's plan, every anchor, sponsor, playlist artist, partner and podcast is a Qloo entity, every score component comes from a Qloo response (or is flagged as estimated), and the validator rejects or drops any entity Qloo didn't return. Across the four demo markets, the control's picks averaged a Taste Fit of 41–45 against the agent's 68–74. The gap uses our Qloo-derived score, so it shows how much better the agent's picks fit this market's Qloo signals; it is not a forecast of ticket sales.
 
 ---
 
 ## Before submitting (internal checklist, not for Devpost)
 
-- [ ] Make the GitHub repo public, and check the MIT [LICENSE](../LICENSE) is on `main`.
-- [ ] Commit `docs/` and `CONTRIBUTING.md`; the absolute links above point at `main`.
+- [ ] Make the GitHub repo public, and check the MIT [LICENSE](../LICENSE) shows in the repo's About section.
 - [ ] Confirm https://theme-night-gm.vercel.app shows **Qloo live**, and `/api/status` reports `"store":"redis"` so share links, replays and featured plans work across instances.
-- [ ] Check that each demo market has a featured live plan on the landing page (run a preset live once if one is missing), since the testing instructions point judges at them.
-- [ ] Landing page copy ([page.tsx](../src/app/page.tsx)) to align with the code: step 01 lists podcasts among the scanned domains (the scan covers movies, TV, artists, video games and books; podcasts are media partners only), and *Responsible by design* says the agent sends "team, city and venue" to Qloo (the code never sends the team name, but it does send search terms and sales-category phrases).
-- [ ] Optional UI copy fix: the season board's "N live · N cached" hint counts simulated requests as "live".
+- [ ] Check that each demo market has a featured live plan with its control result on the landing page, since the testing instructions point judges at them.
