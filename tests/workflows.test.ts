@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { QlooRecorder } from "@/lib/qloo/client";
-import { km, scanMarket, summarizeTrend, supportsTrending, TasteContext, toCard } from "@/lib/qloo/workflows";
+import { QlooRecorder, qlooGet } from "@/lib/qloo/client";
+import { findSponsors, km, nearVenueIndex, scanMarket, scoreCandidates, summarizeTrend, supportsTrending, TasteContext, toCard } from "@/lib/qloo/workflows";
 
 const VENUE = { name: "Downtown ballpark, Durham", city: "Durham, North Carolina", lat: 35.9916, lon: -78.9045 };
 
@@ -149,5 +149,72 @@ describe("scanMarket (simulated Qloo)", () => {
     expect(byType["urn:entity:movie"].params).toMatchObject({ "bias.trends": "medium", take: "25", "signal.location.query": VENUE.city });
     expect(byType["urn:entity:book"].params["bias.trends"]).toBeUndefined();
     expect(recorder.logs.every((l) => l.simulated && l.endpoint === "/v2/insights")).toBe(true);
+  });
+});
+
+describe("nearVenueIndex", () => {
+  // A 10 x 10 grid around the venue, ~2.2 km apart; cells within 16 km are the inner block.
+  const grid = (affinity: (lat: number, lon: number) => number) =>
+    Array.from({ length: 100 }, (_, i) => {
+      const lat = VENUE.lat + (Math.floor(i / 10) - 4.5) * 0.04;
+      const lon = VENUE.lon + ((i % 10) - 4.5) * 0.05;
+      return { lat, lon, affinity: affinity(lat, lon) };
+    });
+  const near = (lat: number, lon: number) => km(lat, lon, VENUE.lat, VENUE.lon) <= 16;
+
+  it("peaks when every hotspot sits in the catchment and is 0 when none does", () => {
+    // The ceiling is 1 / (1 + catchment share of cells): 44 of these 100 cells are in the catchment.
+    expect(nearVenueIndex(grid((lat, lon) => (near(lat, lon) ? 0.9 : 0.1)), VENUE, 16)).toBeCloseTo(1 / 1.44, 2);
+    expect(nearVenueIndex(grid((lat, lon) => (near(lat, lon) ? 0.1 : 0.9)), VENUE, 16)).toBe(0);
+  });
+
+  it("is about 0.5 when hotspots are spread evenly", () => {
+    const even = nearVenueIndex(grid((lat, lon) => ((Math.round(lat * 100) + Math.round(lon * 100)) % 5) / 5), VENUE, 16)!;
+    expect(even).toBeGreaterThan(0.3);
+    expect(even).toBeLessThan(0.7);
+  });
+
+  it("returns undefined when there are too few cells to measure", () => {
+    expect(nearVenueIndex([{ lat: VENUE.lat, lon: VENUE.lon, affinity: 1 }], VENUE, 16)).toBeUndefined();
+  });
+});
+
+describe("run limits (simulated Qloo)", () => {
+  beforeAll(() => {
+    delete process.env.QLOO_API_KEY;
+  });
+
+  it("stops at the request budget but still serves cached responses", async () => {
+    const recorder = new QlooRecorder(undefined, 0, { budget: 1 });
+    await qlooGet("/search", { query: "budget-a" }, recorder, "first");
+    await expect(qlooGet("/search", { query: "budget-b" }, recorder, "second")).rejects.toThrow(/budget of 1/);
+    await expect(qlooGet("/search", { query: "budget-a" }, recorder, "cached")).resolves.toBeDefined();
+  });
+
+  it("refuses new requests once the run is cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const recorder = new QlooRecorder(undefined, 0, { signal: controller.signal });
+    await expect(qlooGet("/search", { query: "stopped" }, recorder, "x")).rejects.toThrow(/stopped/i);
+    expect(recorder.logs).toEqual([]);
+  });
+
+  it("gives parallel scoring calls the same fan-base proxy", async () => {
+    const ctx = new TasteContext(new QlooRecorder(), VENUE.city, VENUE, "baseball");
+    const scan = await scanMarket(ctx, ["movie", "artist"]);
+    const [movies, artists] = scan.domains.map((d) => d.entities.slice(0, 2).map((e) => e.id));
+    const [a, b] = await Promise.all([scoreCandidates(ctx, movies, ["families"]), scoreCandidates(ctx, artists, ["families"])]);
+    expect(a.proxy?.name).toBeDefined();
+    expect(b.proxy).toEqual(a.proxy);
+    for (const id of [...movies, ...artists]) expect(ctx.fanOverlap.has(id), id).toBe(true);
+  });
+
+  it("resolves every sponsor category to a Qloo tag and reports the ones it can't", async () => {
+    const ctx = new TasteContext(new QlooRecorder(), VENUE.city, VENUE, "baseball");
+    const scan = await scanMarket(ctx, ["movie"]);
+    const categories = ["Beverages", "Restaurants", "Automotive", "Insurance", "Toys", "Underwater Basket Weaving"];
+    const { brands, unresolved } = await findSponsors(ctx, [scan.domains[0].entities[0].id], categories);
+    expect(unresolved).toEqual(["Underwater Basket Weaving"]);
+    expect(new Set(brands.map((b) => b.category))).toEqual(new Set(categories.slice(0, 5)));
   });
 });

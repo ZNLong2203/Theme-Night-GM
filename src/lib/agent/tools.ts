@@ -10,6 +10,7 @@ import {
   scoreCandidates,
   scoreIn,
   searchEntities,
+  supportsTrending,
   type TasteContext,
 } from "@/lib/qloo/workflows";
 import { toolCallScope } from "@/lib/qloo/client";
@@ -127,7 +128,7 @@ const profileTool: ToolDef<{ entity_ids: string[] }> = {
   declaration: {
     name: "profile_fandoms",
     description:
-      "Deep-dive up to 6 candidate fandoms: aggregate age/gender affinity (urn:demographics), 16-week trend (/v2/trending), heatmap of where fans concentrate around the venue (urn:heatmap → near_venue_index 0-1, 0.5 = metro average), and taste tags (urn:tag).",
+      "Deep-dive up to 6 candidate fandoms: aggregate age/gender affinity (urn:demographics), 16-week trend (/v2/trending), heatmap of where fans concentrate around the venue (urn:heatmap → near_venue_index 0-1: share of the fandom's metro hotspots inside the venue catchment, 0.5 = fair share), and taste tags (urn:tag). Measurements Qloo couldn't make are listed under unavailable.",
     parametersJsonSchema: {
       type: "object",
       properties: { entity_ids: { type: "array", items: { type: "string" }, description: "Qloo entity IDs (max 6)." } },
@@ -150,11 +151,15 @@ const profileTool: ToolDef<{ entity_ids: string[] }> = {
           name: p.entity.name,
           strongest_age_affinity: topAges,
           gender_skew: p.demographics?.gender,
-          trend: p.trend?.window
-            ? `${p.trend.direction} (${p.trend.changePct > 0 ? "+" : ""}${p.trend.changePct}% in Qloo trending ${p.trend.window.start} → ${p.trend.window.end})`
-            : "no trending data",
+          trend:
+            p.trend?.window && p.trend.direction !== "unknown"
+              ? `${p.trend.direction} (${p.trend.changePct > 0 ? "+" : ""}${p.trend.changePct}% in Qloo trending ${p.trend.window.start} → ${p.trend.window.end})`
+              : supportsTrending(p.entity.kind)
+                ? "no trending data"
+                : "Qloo doesn't track trending for this domain",
           near_venue_index: p.heat?.nearVenueIndex ?? null,
           taste_tags: p.tasteTags?.slice(0, 6),
+          ...(p.unavailable ? { unavailable: p.unavailable } : {}),
           evidence: p.evidence,
         };
       }),
@@ -220,11 +225,13 @@ const sponsorTool: ToolDef<{ anchor_entity_ids: string[]; categories?: string[] 
   label: (a) => `Finding sponsor brands that share the taste of ${a.anchor_entity_ids.length} fandom(s)`,
   async execute(args, run) {
     const anchors = ids(run, args.anchor_entity_ids).slice(0, 3);
-    const { brands } = await findSponsors(run.taste, anchors, args.categories ?? run.team.sponsorCategories);
+    const { brands, unresolved } = await findSponsors(run.taste, anchors, args.categories ?? run.team.sponsorCategories);
     const anchorName = run.taste.cards.get(anchors[0])?.name ?? anchors[0];
     return {
-      output: brands.map(compact),
-      summary: `${brands.length} sponsor prospects for ${anchorName}: ${brands.slice(0, 4).map((b) => b.name).join(", ")}.`,
+      output: unresolved.length ? { brands: brands.map(compact), unresolved_categories: unresolved } : brands.map(compact),
+      summary: `${brands.length} sponsor prospects for ${anchorName}: ${brands.slice(0, 4).map((b) => b.name).join(", ")}.${
+        unresolved.length ? ` No Qloo brand tag for: ${unresolved.join(", ")}.` : ""
+      }`,
       ui: { kind: "sponsors", anchor: anchorName, brands },
     };
   },

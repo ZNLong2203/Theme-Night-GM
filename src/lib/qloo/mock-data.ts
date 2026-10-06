@@ -135,6 +135,12 @@ export const MOCK_CATALOG: MockItem[] = [
       ["Baldur's Gate 3", 0.4, -0.4, 0.0, 0.88, ["Larian Studios"], ["RPG", "Fantasy"]],
       ["Rocket League", 0.8, -0.8, -0.1, 0.86, ["Psyonix", "Epic Games"], ["Car Soccer", "Esports"]],
       ["MLB The Show 25", 0.4, -0.9, 0.1, 0.8, ["Sony Interactive Entertainment"], ["Baseball", "Sports Sim"]],
+      // League games stand in for each sport's existing fan base (popularity below the scan floor, so
+      // they never become theme-night candidates).
+      ["EA Sports FC 25", 0.6, -0.8, 0.1, 0.75, ["Electronic Arts"], ["Soccer", "Sports Sim"]],
+      ["NHL 25", 0.3, -0.9, 0.0, 0.7, ["Electronic Arts"], ["Hockey", "Sports Sim"]],
+      ["NBA 2K25", 0.7, -0.8, 0.1, 0.78, ["2K"], ["Basketball", "Sports Sim"]],
+      ["Madden NFL 25", 0.4, -0.9, 0.0, 0.78, ["Electronic Arts"], ["Football", "Sports Sim"]],
       ["Super Mario Bros. Wonder", 0.7, -0.1, 0.0, 0.9, ["Nintendo"], ["Platformer"], { family: true }],
     ] as [string, number, number, number, number, string[], string[], Partial<MockItem>?][]
   ).map(([name, age, gender, trend, pop, owners, tags, extra]) => ({

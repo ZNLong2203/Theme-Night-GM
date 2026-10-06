@@ -104,11 +104,38 @@ function scoreItem(item: MockItem, q: Record<string, string>): number {
   return Math.max(0.01, Math.min(0.999, score / 1.25));
 }
 
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+const industryTag = (industry: string) => `urn:tag:industry:qloo:${slug(industry)}`;
+/** Category phrases the app searches with that don't share a word with the mock industry names. */
+const TAG_ALIASES: Record<string, string> = { "fast food": "Quick Service Restaurants", "soft drinks": "Soft Drinks" };
+
+/** /v2/tags: resolve a phrase to the industry tags the mock brands carry. */
+function tagSearch(q: Record<string, string>) {
+  const term = (q["filter.query"] ?? "").toLowerCase().trim();
+  const industries = [...new Set(MOCK_CATALOG.flatMap((i) => i.industries ?? []))];
+  const alias = TAG_ALIASES[term];
+  const stem = term.replace(/s$/, "");
+  const hits = industries.filter((name) => name === alias || (stem.length > 2 && name.toLowerCase().includes(stem)));
+  return {
+    success: true,
+    results: { tags: hits.slice(0, Number(q.take ?? 8)).map((name) => ({ id: industryTag(name), name, type: "urn:tag:industry:qloo" })) },
+  };
+}
+
 function insightsEntities(type: string, q: Record<string, string>) {
   const take = Number(q.take ?? 20);
-  if (type === "urn:entity:place") return { success: true, results: { entities: mockPlaces(q, take) } };
+  const location = q["signal.location.query"];
+  // Like the live API, echo how the location signal was resolved.
+  const query = location ? { localities: { signal: { name: location, disambiguation: `${location} (simulated)` } } } : undefined;
+  if (type === "urn:entity:place") return { success: true, results: { entities: mockPlaces(q, take) }, query };
   const kind = (Object.keys(KIND_URN) as MockItem["kind"][]).find((k) => KIND_URN[k] === type);
   let pool = MOCK_CATALOG.filter((i) => i.kind === kind);
+  const minPop = Number(q["filter.popularity.min"] ?? 0);
+  if (minPop > 0) pool = pool.filter((i) => i.pop >= minPop);
+  const tags = q["filter.tags"]?.split(",");
+  if (tags) pool = pool.filter((i) => (i.industries ?? []).some((name) => tags.includes(industryTag(name))));
+  const excludeTags = q["filter.exclude.tags"]?.split(",") ?? [];
+  pool = pool.filter((i) => !(i.industries ?? []).some((name) => excludeTags.includes(industryTag(name))));
   const shortlist = q["filter.results.entities"]?.split(",");
   if (shortlist) pool = pool.filter((i) => shortlist.includes(mockId(i.name)));
   const exclude = q["filter.exclude.entities"]?.split(",") ?? [];
@@ -120,7 +147,7 @@ function insightsEntities(type: string, q: Record<string, string>) {
     .map((item) => ({ item, affinity: hasSignal ? scoreItem(item, q) : null }))
     .sort((a, b) => (b.affinity ?? b.item.pop) - (a.affinity ?? a.item.pop))
     .slice(0, take);
-  return { success: true, results: { entities: scored.map(({ item, affinity }) => entityJson(item, affinity)) } };
+  return { success: true, results: { entities: scored.map(({ item, affinity }) => entityJson(item, affinity)) }, query };
 }
 
 function mockPlaces(q: Record<string, string>, take: number) {
@@ -183,7 +210,8 @@ function heatmap(q: Record<string, string>) {
   }
   cells.sort((a, b) => b.query.affinity - a.query.affinity);
   cells.forEach((c, i) => (c.query.affinity_rank = Number((1 - i / cells.length).toFixed(4))));
-  return { success: true, results: { heatmap: cells.slice(0, Number(q.take ?? 200)) } };
+  // The live heatmap ignores `take` and returns every cell (LA: 2,741), so the mock does too.
+  return { success: true, results: { heatmap: cells } };
 }
 
 function demographics(q: Record<string, string>) {
@@ -304,6 +332,8 @@ export async function mockQloo(path: string, q: Record<string, string>): Promise
       return search(q);
     case "/v2/audiences":
       return audiences(q);
+    case "/v2/tags":
+      return tagSearch(q);
     case "/entities": {
       const ids = (q.entity_ids ?? "").split(",");
       return { success: true, results: ids.map((id) => byId.get(id)).filter(Boolean).map((i) => entityJson(i as MockItem, null)) };

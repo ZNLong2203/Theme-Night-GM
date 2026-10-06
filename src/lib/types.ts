@@ -103,8 +103,8 @@ export interface HeatPoint {
 
 export interface HeatSummary {
   points: HeatPoint[];
-  /** 0..1 — how much of the metro's strongest affinity sits within the venue's catchment. */
-  nearVenueIndex: number;
+  /** 0..1 — the catchment's share of the fandom's metro hotspots vs its share of cells (0.5 = fair share). Absent when too few cells. */
+  nearVenueIndex?: number;
   catchmentKm: number;
 }
 
@@ -116,6 +116,8 @@ export interface EntityProfile {
   tasteTags?: string[];
   segmentFit?: Partial<Record<SegmentId, number>>;
   evidence: string[];
+  /** Measurements that failed, e.g. "Trend: Qloo request failed (429)" — shown instead of "no data". */
+  unavailable?: string[];
 }
 
 /** One request made to Qloo, recorded for the provenance ("receipts") panel. */
@@ -140,7 +142,11 @@ export interface ScoreBreakdown {
   segmentFit: number; // 0..1
   momentum: number; // 0..1
   newFanReach: number; // 0..1
+  /** Components Qloo couldn't measure for this fandom, scored at the neutral 0.5 instead. */
+  estimated?: ScoreComponent[];
 }
+
+export type ScoreComponent = "localAffinity" | "segmentFit" | "nearVenue" | "momentum" | "newFanReach";
 
 export interface Night {
   date: string;

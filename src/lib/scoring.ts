@@ -1,4 +1,4 @@
-import type { EntityCard, EntityProfile, ScoreBreakdown, SegmentId } from "./types";
+import type { EntityCard, EntityProfile, ScoreBreakdown, ScoreComponent, SegmentId } from "./types";
 
 /** Weights for the Taste Fit Score. Kept in one place so the UI can explain them. */
 export const SCORE_WEIGHTS = {
@@ -20,7 +20,7 @@ export const SCORE_LABELS: Record<keyof typeof SCORE_WEIGHTS, { label: string; h
   },
   nearVenue: {
     label: "Fans near the venue",
-    help: "Share of the fandom's Qloo heatmap affinity inside the venue's catchment vs the wider metro (urn:heatmap).",
+    help: "Share of the fandom's metro hotspots (top 20% of Qloo heatmap cells) inside the venue's 16 km catchment, relative to the catchment's share of all cells. 0.5 = fair share (urn:heatmap).",
   },
   momentum: {
     label: "Momentum",
@@ -42,12 +42,19 @@ export function computeScore(input: {
   segmentFit?: Partial<Record<SegmentId, number>>;
   fanOverlap?: number;
 }): ScoreBreakdown {
-  const localAffinity = clamp(input.localAffinity ?? input.entity.affinity ?? 0.5);
-  const segmentFit = clamp(input.segmentFit?.[input.segment] ?? 0.5);
-  const nearVenue = clamp(input.profile?.heat?.nearVenueIndex ?? 0.5);
-  const change = input.profile?.trend?.changePct ?? 0;
-  const momentum = clamp(0.5 + change / 40);
-  const newFanReach = clamp(input.fanOverlap === undefined ? 0.5 : 1 - input.fanOverlap * 0.8);
+  // A missing measurement scores a neutral 0.5 and is flagged; raw affinity from some other query is
+  // never used instead, because Qloo normalizes affinity per query.
+  const estimated: ScoreComponent[] = [];
+  const measured = (component: ScoreComponent, value: number | undefined) => {
+    if (value === undefined) estimated.push(component);
+    return clamp(value ?? 0.5);
+  };
+  const trend = input.profile?.trend;
+  const localAffinity = measured("localAffinity", input.localAffinity);
+  const segmentFit = measured("segmentFit", input.segmentFit?.[input.segment]);
+  const nearVenue = measured("nearVenue", input.profile?.heat?.nearVenueIndex);
+  const momentum = measured("momentum", trend && trend.direction !== "unknown" ? 0.5 + trend.changePct / 40 : undefined);
+  const newFanReach = measured("newFanReach", input.fanOverlap === undefined ? undefined : 1 - input.fanOverlap * 0.8);
   const total =
     100 *
     (SCORE_WEIGHTS.localAffinity * localAffinity +
@@ -63,5 +70,6 @@ export function computeScore(input: {
     nearVenue: r(nearVenue),
     momentum: r(momentum),
     newFanReach: r(newFanReach),
+    ...(estimated.length ? { estimated } : {}),
   };
 }

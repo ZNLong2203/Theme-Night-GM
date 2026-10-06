@@ -145,7 +145,7 @@ export function FandomBoard({ profiles, venue }: { profiles: EntityProfile[]; ve
             <span className="min-w-0">
               <span className="block truncate text-xs font-semibold text-text">{p.entity.name}</span>
               <span className="font-mono text-[10px] text-faint">
-                venue {p.heat?.nearVenueIndex.toFixed(2) ?? "—"} · {p.trend?.direction ?? "—"}
+                venue {p.heat?.nearVenueIndex?.toFixed(2) ?? "—"} · {p.trend?.direction ?? "—"}
               </span>
             </span>
           </button>
@@ -158,8 +158,8 @@ export function FandomBoard({ profiles, venue }: { profiles: EntityProfile[]; ve
               <span className="font-display text-lg font-bold uppercase">{active.entity.name}</span>
               <KindBadge kind={active.entity.kind} />
             </div>
-            <Badge tone="amber" title="Share of heatmap affinity inside the venue catchment vs the metro (0.5 = average)">
-              near-venue index {active.heat?.nearVenueIndex.toFixed(2) ?? "—"}
+            <Badge tone="amber" title="Share of the fandom's metro hotspots inside the venue catchment (0.5 = fair share)">
+              near-venue index {active.heat?.nearVenueIndex?.toFixed(2) ?? "—"}
             </Badge>
           </div>
           <HeatMap

@@ -4,6 +4,7 @@ import type {
   EntityCard,
   EntityKind,
   EntityProfile,
+  HeatPoint,
   HeatSummary,
   MarketScan,
   SegmentId,
@@ -11,7 +12,7 @@ import type {
   Venue,
 } from "@/lib/types";
 import { computeScore } from "@/lib/scoring";
-import { QlooRecorder, qlooGet } from "./client";
+import { QlooError, QlooRecorder, qlooGet } from "./client";
 
 export const KIND_URN: Record<EntityKind, string> = {
   movie: "urn:entity:movie",
@@ -45,6 +46,8 @@ export class TasteContext {
   readonly segmentFit = new Map<string, Partial<Record<SegmentId, number>>>();
   readonly demographics = new Map<string, Demographics>();
   readonly demographicsRequest = new Map<string, string>();
+  /** Entities whose urn:demographics request failed (as opposed to Qloo having no data). */
+  readonly demographicsFailed = new Set<string>();
   /** Rank percentile under the sport fan-base proxy signal (1 = existing fans like it most). */
   readonly fanOverlap = new Map<string, number>();
   readonly evidence = new Map<string, string[]>();
@@ -52,7 +55,8 @@ export class TasteContext {
   readonly pools = new Map<EntityKind, string[]>();
   /** How Qloo resolved the market name, e.g. "Durham County, North Carolina, United States". */
   resolvedLocality?: string;
-  fanbaseProxy?: EntityCard | null;
+  /** In-flight or settled fan-base proxy lookup, shared by concurrent scoring calls. */
+  fanbaseProxy?: Promise<EntityCard | null>;
   private familiesAudience?: string | null;
   private poolScans = new Map<EntityKind, Promise<void>>();
 
@@ -63,11 +67,27 @@ export class TasteContext {
     readonly sport?: string,
   ) {}
 
-  remember(cards: EntityCard[]) {
+  /**
+   * `fromScan` marks cards from a market scan: their rank fields replace older ones together, so a
+   * rescan never leaves a card with ranks from two different result sets.
+   */
+  remember(cards: EntityCard[], fromScan = false) {
     for (const card of cards) {
       const prev = this.cards.get(card.id);
-      // Keep the first affinity we saw (the city scan) — later queries are normalized differently.
-      this.cards.set(card.id, { ...prev, ...card, affinity: prev?.affinity ?? card.affinity, localRank: prev?.localRank ?? card.localRank });
+      if (fromScan) {
+        this.cards.set(card.id, { ...prev, ...card });
+        continue;
+      }
+      // Keep the scan's affinity and ranks — later queries are normalized differently.
+      this.cards.set(card.id, {
+        ...prev,
+        ...card,
+        affinity: prev?.affinity ?? card.affinity,
+        localRank: prev?.localRank ?? card.localRank,
+        nationalRank: prev?.nationalRank ?? card.nationalRank,
+        lift: prev?.lift ?? card.lift,
+        localPct: prev?.localPct ?? card.localPct,
+      });
     }
   }
 
@@ -269,12 +289,13 @@ export async function scanMarket(ctx: TasteContext, kinds: EntityKind[], take = 
           localPct: pctAt(localIndex, cards.length),
         };
       });
+      // The latest scan of a domain is authoritative (the model may rescan with a lower popularity floor).
       ctx.pools.set(kind, enriched.map((c) => c.id));
       for (const card of enriched) {
-        if (!ctx.localPct.has(card.id)) ctx.localPct.set(card.id, card.localPct);
+        ctx.localPct.set(card.id, card.localPct);
         ctx.cite(card.id, requestId);
       }
-      ctx.remember(enriched);
+      ctx.remember(enriched, true);
       return { kind, entities: enriched.slice(0, take), evidence: requestId };
     }),
   );
@@ -316,23 +337,45 @@ const TREND_WEEKS = 16;
  */
 const TREND_END = process.env.QLOO_TRENDING_END ?? "2025-09-28";
 
+/** Why a measurement is missing, in words the UI and the model can repeat ("Qloo 429"). */
+const failureOf = (error: unknown) => `Qloo request failed${error instanceof QlooError ? ` (${error.status})` : ""}`;
+
 async function trendFor(ctx: TasteContext, card: EntityCard) {
   if (!supportsTrending(card.kind)) return undefined;
-  for (const end of [TREND_END]) {
-    const endDate = new Date(`${end}T00:00:00Z`);
-    const start = iso(new Date(endDate.getTime() - TREND_WEEKS * 7 * 86400000));
+  const end = TREND_END;
+  const start = iso(new Date(new Date(`${end}T00:00:00Z`).getTime() - TREND_WEEKS * 7 * 86400000));
+  try {
     const res = await qlooGet<RawInsights>(
       "/v2/trending",
       { "filter.type": KIND_URN[card.kind], "signal.interests.entities": card.id, "filter.start_date": start, "filter.end_date": end },
       ctx.recorder,
       `Is interest in ${card.name} rising or cooling? (${start} → ${end})`,
-    ).catch(() => undefined);
-    const points = (res?.body.results?.trending ?? [])
+    );
+    const points = (res.body.results?.trending ?? [])
       .filter((p) => p.date && typeof p.population_percentile === "number")
       .map((p) => ({ date: p.date as string, percentile: p.population_percentile as number }));
-    if (res) return { series: summarizeTrend(points, { start, end }), requestId: res.requestId };
+    return { series: summarizeTrend(points, { start, end }), requestId: res.requestId };
+  } catch (error) {
+    return { failed: `Trend: ${failureOf(error)}` };
   }
-  return undefined;
+}
+
+/** Fraction of the metro's hottest cells (top 20% by affinity) that we count as the fandom's hotspots. */
+const HOTSPOT_SHARE = 0.2;
+
+/**
+ * 0.5 = the venue's catchment holds its fair share of the fandom's hotspots; 1 = all of them; 0 = none.
+ * Hotspot share is compared with the catchment's share of all cells, so a big catchment isn't rewarded
+ * for its size, and only ranks are used (heatmap affinity is normalized per query).
+ */
+export function nearVenueIndex(points: HeatPoint[], venue: { lat: number; lon: number }, catchmentKm: number): number | undefined {
+  if (points.length < 10) return undefined;
+  const isNear = (p: HeatPoint) => km(p.lat, p.lon, venue.lat, venue.lon) <= catchmentKm;
+  const nearCells = points.filter(isNear).length;
+  if (!nearCells) return 0;
+  const hot = [...points].sort((a, b) => b.affinity - a.affinity).slice(0, Math.max(1, Math.round(points.length * HOTSPOT_SHARE)));
+  const ratio = hot.filter(isNear).length / hot.length / (nearCells / points.length);
+  return round(ratio / (1 + ratio));
 }
 
 async function fetchDemographics(ctx: TasteContext, ids: string[]) {
@@ -344,7 +387,10 @@ async function fetchDemographics(ctx: TasteContext, ids: string[]) {
       { "filter.type": "urn:demographics", "signal.interests.entities": chunk.join(",") },
       ctx.recorder,
       `Aggregate age and gender affinity of ${chunk.length} fandom(s)`,
-    ).catch(() => undefined);
+    ).catch(() => {
+      chunk.forEach((id) => ctx.demographicsFailed.add(id));
+      return undefined;
+    });
     for (const row of res?.body.results?.demographics ?? []) {
       if (!row.query) continue;
       ctx.demographics.set(row.entity_id, {
@@ -378,7 +424,7 @@ export async function profileEntities(ctx: TasteContext, ids: string[], catchmen
           },
           ctx.recorder,
           `Where within 40 km of ${ctx.venue.name} do ${card.name} fans concentrate?`,
-        ).catch(() => undefined),
+        ).catch((error: unknown) => ({ failed: `Heatmap: ${failureOf(error)}` })),
         qlooGet<RawInsights>(
           "/v2/insights",
           { "filter.type": "urn:tag", "signal.interests.entities": id, take: 8 },
@@ -395,11 +441,15 @@ export async function profileEntities(ctx: TasteContext, ids: string[], catchmen
     const parts = perEntity.find((p) => p.id === id)!;
     const demographics = ctx.demographics.get(id);
     const evidence: string[] = [ctx.demographicsRequest.get(id)].filter((r): r is string => Boolean(r));
+    const unavailable: string[] = [];
 
-    if (parts.trend) evidence.push(parts.trend.requestId);
+    if (parts.trend?.failed) unavailable.push(parts.trend.failed);
+    else if (parts.trend?.requestId) evidence.push(parts.trend.requestId);
+    if (parts.heat && "failed" in parts.heat) unavailable.push(parts.heat.failed);
+    if (!demographics && ctx.demographicsFailed.has(id)) unavailable.push("Demographics: Qloo request failed");
 
     let heat: HeatSummary | undefined;
-    if (parts.heat) {
+    if (parts.heat && !("failed" in parts.heat)) {
       evidence.push(parts.heat.requestId);
       const points = (parts.heat.body.results?.heatmap ?? [])
         .filter((c) => typeof c.location?.latitude === "number" && typeof c.location?.longitude === "number")
@@ -409,16 +459,14 @@ export async function profileEntities(ctx: TasteContext, ids: string[], catchmen
           affinity: round(c.query?.affinity ?? 0),
           popularity: c.query?.popularity,
         }));
-      const near = points.filter((p) => km(p.lat, p.lon, ctx.venue.lat, ctx.venue.lon) <= catchmentKm);
-      const mean = (xs: typeof points) => (xs.length ? xs.reduce((s, p) => s + p.affinity, 0) / xs.length : 0);
-      // 0.5 = the catchment looks like the metro average; 1 = twice as strong near the venue.
-      const ratio = mean(points) > 0 ? mean(near) / mean(points) : 0;
       // Heatmaps ignore `take` (LA returned 2,741 cells live). Score on every cell, ship the strongest 300.
       const display = [...points]
         .sort((a, b) => b.affinity - a.affinity)
         .slice(0, HEAT_DISPLAY_CELLS)
         .map((p) => ({ lat: round(p.lat, 4), lon: round(p.lon, 4), affinity: p.affinity }));
-      heat = { points: display, nearVenueIndex: points.length ? round(Math.max(0, Math.min(1, ratio / 2))) : 0.5, catchmentKm };
+      const index = nearVenueIndex(points, ctx.venue, catchmentKm);
+      if (index === undefined) unavailable.push("Heatmap: too few cells to measure");
+      heat = { points: display, nearVenueIndex: index, catchmentKm };
     }
 
     let tasteTags: string[] | undefined;
@@ -436,6 +484,7 @@ export async function profileEntities(ctx: TasteContext, ids: string[], catchmen
       tasteTags,
       segmentFit: ctx.segmentFit.get(id),
       evidence,
+      ...(unavailable.length ? { unavailable } : {}),
     };
     ctx.profiles.set(id, profile);
     return profile;
@@ -515,17 +564,16 @@ const FANBASE_PROXIES: Record<string, string[]> = {
   football: ["National Football League", "Madden NFL"],
 };
 
-async function resolveFanbaseProxy(ctx: TasteContext): Promise<EntityCard | null> {
-  if (ctx.fanbaseProxy !== undefined) return ctx.fanbaseProxy;
-  ctx.fanbaseProxy = null;
-  for (const query of FANBASE_PROXIES[ctx.sport ?? ""] ?? []) {
-    const found = await searchEntities(ctx, query, ["brand", "videogame", "tv_show"], 3).catch(() => []);
-    const exact = found.find((c) => c.name.toLowerCase() === query.toLowerCase()) ?? found[0];
-    if (exact) {
-      ctx.fanbaseProxy = exact;
-      break;
+/** Memoizes the in-flight lookup, so parallel scoring calls in one turn all get the proxy. */
+function resolveFanbaseProxy(ctx: TasteContext): Promise<EntityCard | null> {
+  ctx.fanbaseProxy ??= (async () => {
+    for (const query of FANBASE_PROXIES[ctx.sport ?? ""] ?? []) {
+      const found = await searchEntities(ctx, query, ["brand", "videogame", "tv_show"], 3).catch(() => []);
+      const exact = found.find((c) => c.name.toLowerCase() === query.toLowerCase()) ?? found[0];
+      if (exact) return exact;
     }
-  }
+    return null;
+  })();
   return ctx.fanbaseProxy;
 }
 
@@ -641,6 +689,8 @@ const TAG_PRIORITY = ["urn:tag:product_category:qloo:", "urn:tag:industry:qloo:"
 /** Leagues, teams and sports media are partners or competitors, not sponsor prospects. */
 const NOT_SPONSORS = "urn:tag:genre:brand:sports_organization,urn:tag:genre:brand:entertainment:media:sports";
 const categoryTags = new Map<string, Promise<string | null>>();
+/** The studio lets the sales team pick up to 6 categories; all of them are queried. */
+export const MAX_SPONSOR_CATEGORIES = 6;
 
 function categoryTag(ctx: TasteContext, category: string): Promise<string | null> {
   const key = category.toLowerCase();
@@ -659,11 +709,10 @@ function categoryTag(ctx: TasteContext, category: string): Promise<string | null
     )
       .then(({ body }) => {
         const tags = (body.results?.tags ?? []).map((t) => t.id ?? "").filter(Boolean);
-        for (const prefix of TAG_PRIORITY) {
-          const hit = tags.find((t) => t.startsWith(prefix));
-          if (hit) return hit;
-        }
-        return tags[0] ?? null;
+        const hit = TAG_PRIORITY.map((prefix) => tags.find((t) => t.startsWith(prefix))).find(Boolean) ?? tags[0];
+        // Only a resolved tag is worth keeping for the instance's lifetime; misses are retried next run.
+        if (!hit) categoryTags.delete(key);
+        return hit ?? null;
       })
       .catch(() => {
         categoryTags.delete(key);
@@ -682,16 +731,18 @@ export async function findSponsors(ctx: TasteContext, anchorIds: string[], categ
     "feature.explainability": true,
     "filter.exclude.tags": NOT_SPONSORS,
   };
-  const resolved = (await Promise.all(categories.slice(0, 4).map(async (c) => ({ category: c, tag: await categoryTag(ctx, c) })))).filter(
-    (r): r is { category: string; tag: string } => Boolean(r.tag),
-  );
+  const lookups = await Promise.all(categories.slice(0, MAX_SPONSOR_CATEGORIES).map(async (c) => ({ category: c, tag: await categoryTag(ctx, c) })));
+  const resolved = lookups.filter((r): r is { category: string; tag: string } => Boolean(r.tag));
+  const unresolved = lookups.filter((r) => !r.tag).map((r) => r.category);
+  // Fewer prospects per category when the sales team asks for many, so each request stays small.
+  const perCategory = resolved.length > 4 ? 4 : 6;
   const groups = resolved.length
     ? await Promise.all(
         resolved.map(async ({ category, tag }) => {
           const { cards, requestId } = await insightsEntities(
             ctx,
             "brand",
-            { ...signal, "filter.tags": tag, take: 6 },
+            { ...signal, "filter.tags": tag, take: perCategory },
             `${category} brands whose audiences share this fandom's taste (sponsor prospects)`,
           ).catch(() => ({ cards: [] as EntityCard[], requestId: "" }));
           return { cards: cards.map((c) => ({ ...c, category })), requestId };
@@ -719,7 +770,7 @@ export async function findSponsors(ctx: TasteContext, anchorIds: string[], categ
   ctx.remember(merged);
   for (const g of groups) g.cards.forEach((c) => ctx.cite(c.id, g.requestId));
   anchorIds.forEach((id) => groups.forEach((g) => ctx.cite(id, g.requestId)));
-  return { brands: merged.slice(0, 10) };
+  return { brands: merged.slice(0, 12), unresolved };
 }
 
 /** Bars, restaurants, breweries and cafés make workable pre-game and concession partners. */

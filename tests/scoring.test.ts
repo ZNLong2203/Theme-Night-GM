@@ -19,7 +19,7 @@ describe("SCORE_WEIGHTS", () => {
 });
 
 describe("computeScore", () => {
-  it("defaults every unmeasured component to 0.5 (total 50)", () => {
+  it("defaults every unmeasured component to 0.5 (total 50) and flags it as estimated", () => {
     expect(computeScore({ entity, segment: "families" })).toEqual({
       total: 50,
       localAffinity: 0.5,
@@ -27,13 +27,23 @@ describe("computeScore", () => {
       nearVenue: 0.5,
       momentum: 0.5,
       newFanReach: 0.5,
+      estimated: ["localAffinity", "segmentFit", "nearVenue", "momentum", "newFanReach"],
     });
   });
 
-  it("prefers the measured local rank over the card's raw affinity", () => {
-    const card = { ...entity, affinity: 0.2 };
-    expect(computeScore({ entity: card, segment: "families" }).localAffinity).toBe(0.2);
-    expect(computeScore({ entity: card, segment: "families", localAffinity: 0.9 }).localAffinity).toBe(0.9);
+  it("never borrows raw affinity from another query when the local rank is missing", () => {
+    const card = { ...entity, affinity: 0.97 };
+    const missing = computeScore({ entity: card, segment: "families" });
+    expect(missing.localAffinity).toBe(0.5);
+    expect(missing.estimated).toContain("localAffinity");
+    const measured = computeScore({ entity: card, segment: "families", localAffinity: 0.9 });
+    expect(measured.localAffinity).toBe(0.9);
+    expect(measured.estimated).not.toContain("localAffinity");
+  });
+
+  it("treats a trend with too few points as unmeasured momentum", () => {
+    const unknown: EntityProfile = { entity, evidence: [], trend: { points: [], direction: "unknown", changePct: 0 } };
+    expect(computeScore({ entity, segment: "families", profile: unknown }).estimated).toContain("momentum");
   });
 
   it("reads segment fit for the requested segment only", () => {
