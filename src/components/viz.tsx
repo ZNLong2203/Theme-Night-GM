@@ -1,7 +1,7 @@
 "use client";
 
 import { SCORE_LABELS, SCORE_WEIGHTS } from "@/lib/scoring";
-import type { AgeBucket, Demographics, EntityProfile, ScoreBreakdown, TrendSeries } from "@/lib/types";
+import type { AgeBucket, Demographics, EntityKind, EntityProfile, ScoreBreakdown, TrendSeries } from "@/lib/types";
 import { cn, Meter } from "./ui";
 
 const AGE_LABELS: Record<AgeBucket, string> = {
@@ -61,8 +61,21 @@ export function DemographicsBars({ demographics, className }: { demographics?: D
 /** "Qloo request failed (429)" when the profile's trend request failed, as opposed to Qloo having no data. */
 export const trendFailure = (profile?: EntityProfile) => profile?.unavailable?.find((u) => u.startsWith("Trend: "))?.slice("Trend: ".length);
 
-export function TrendSpark({ trend, failed, width = 220, height = 48 }: { trend?: TrendSeries; failed?: string; width?: number; height?: number }) {
+export function TrendSpark({
+  trend,
+  failed,
+  kind,
+  width = 220,
+  height = 48,
+}: {
+  trend?: TrendSeries;
+  failed?: string;
+  kind?: EntityKind;
+  width?: number;
+  height?: number;
+}) {
   if (failed) return <p className="text-xs text-rose">Trend unavailable: {failed}.</p>;
+  if (kind === "book" || kind === "videogame") return <p className="text-xs text-faint">Qloo doesn&apos;t track trending for books or video games.</p>;
   if (!trend || trend.points.length < 2) return <p className="text-xs text-faint">Not tracked in Qloo&apos;s trending data.</p>;
   const values = trend.points.map((p) => p.percentile);
   const min = Math.min(...values);

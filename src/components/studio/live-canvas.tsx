@@ -182,7 +182,7 @@ export function FandomBoard({ profiles, venue }: { profiles: EntityProfile[]; ve
         <div className="space-y-3 rounded-lg border border-line bg-bg p-3">
           <div>
             <div className="mb-1 text-xs font-semibold text-muted">Qloo trending (16 weeks)</div>
-            <TrendSpark trend={active.trend} failed={trendFailure(active)} />
+            <TrendSpark trend={active.trend} failed={trendFailure(active)} kind={active.entity.kind} />
           </div>
           {active.tasteTags?.length ? (
             <div>

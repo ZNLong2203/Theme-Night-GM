@@ -274,7 +274,7 @@ export function NightDetail({ night, plan, onClose }: { night: Night; plan: Seas
                   </div>
                   <div>
                     <div className="mb-1 text-xs font-semibold text-muted">Momentum (Qloo trending)</div>
-                    <TrendSpark trend={profile?.trend} failed={trendFailure(profile)} />
+                    <TrendSpark trend={profile?.trend} failed={trendFailure(profile)} kind={night.anchor.kind} />
                   </div>
                 </div>
               </Panel>
