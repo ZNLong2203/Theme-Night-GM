@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Brain, CheckCircle2, ChevronRight, Loader2, MessageSquare, Wrench } from "lucide-react";
+import { AlertTriangle, Brain, CheckCircle2, ChevronRight, Loader2, MessageSquare, Sparkles, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { TimelineItem } from "@/lib/use-agent-run";
 import type { QlooRequestLog } from "@/lib/types";
@@ -31,6 +31,20 @@ export function AgentTrace({ timeline, requests, running }: { timeline: Timeline
   return (
     <ol className="relative space-y-2.5">
       {timeline.map((item) => {
+        if (item.kind === "llm") {
+          return (
+            <li key={item.id} className="flex items-center gap-2 pl-1 font-mono text-[11px] text-faint">
+              {item.status === "started" ? <Loader2 size={12} className="animate-spin text-sky" /> : <Sparkles size={12} className="text-sky" />}
+              {item.status === "started" ? (
+                <span className="text-sky">Gemini is deciding the next step…</span>
+              ) : (
+                <span>
+                  Gemini step {item.step} · {((item.ms ?? 0) / 1000).toFixed(1)}s{item.outputTokens ? ` · ${item.outputTokens.toLocaleString()} tokens` : ""}
+                </span>
+              )}
+            </li>
+          );
+        }
         if (item.kind !== "tool") {
           return (
             <li key={item.id} className="flex gap-2.5">

@@ -80,8 +80,14 @@ function MarketBoard({ state }: { state: RunState }) {
   return (
     <div>
       <p className="mb-3 text-xs text-muted">
-        What <span className="text-text">{state.scan.city}</span> has the strongest Qloo affinity for. <span className="text-turf">↑ lift</span> = places higher
-        locally than by national popularity.
+        What <span className="text-text">{state.scan.city}</span> has the strongest Qloo affinity for
+        {state.scan.resolvedAs && (
+          <>
+            {" "}
+            (Qloo resolved the market to <span className="text-text">{state.scan.resolvedAs}</span>)
+          </>
+        )}
+        . Bars show rank within the city&apos;s top 25; <span className="text-turf">↑ lift</span> = places higher locally than by national popularity.
       </p>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {state.scan.domains.map((domain) => (
@@ -104,9 +110,11 @@ function MarketBoard({ state }: { state: RunState }) {
                         </span>
                       )}
                     </div>
-                    <Meter value={e.affinity ?? 0} className="mt-1 h-1" color={KIND_META[e.kind].color} />
+                    <Meter value={e.localPct ?? e.affinity ?? 0} className="mt-1 h-1" color={KIND_META[e.kind].color} />
                   </div>
-                  <span className="w-9 text-right font-mono text-[10px] text-muted">{e.affinity?.toFixed(2) ?? "—"}</span>
+                  <span className="w-9 text-right font-mono text-[10px] text-muted" title={`Qloo affinity ${e.affinity ?? "—"}`}>
+                    #{e.localRank ?? "—"}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -173,7 +181,7 @@ export function FandomBoard({ profiles, venue }: { profiles: EntityProfile[]; ve
         </div>
         <div className="space-y-3 rounded-lg border border-line bg-bg p-3">
           <div>
-            <div className="mb-1 text-xs font-semibold text-muted">16-week trend</div>
+            <div className="mb-1 text-xs font-semibold text-muted">Qloo trending (16 weeks)</div>
             <TrendSpark trend={active.trend} />
           </div>
           {active.tasteTags?.length ? (
@@ -270,7 +278,13 @@ function KitBoard({ state }: { state: RunState }) {
   );
 }
 
-function KitColumn({ title, items }: { title: string; items: { id: string; name: string; kind: EntityProfile["entity"]["kind"]; affinity?: number; image?: string; industries?: string[] }[] }) {
+function KitColumn({
+  title,
+  items,
+}: {
+  title: string;
+  items: { id: string; name: string; kind: EntityProfile["entity"]["kind"]; affinity?: number; image?: string; category?: string }[];
+}) {
   return (
     <div>
       <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">{title}</div>
@@ -279,7 +293,7 @@ function KitColumn({ title, items }: { title: string; items: { id: string; name:
           <li key={i.id} className="flex items-center gap-2">
             <EntityAvatar entity={i} size={22} />
             <span className="min-w-0 flex-1 truncate text-xs text-text">{i.name}</span>
-            <span className="font-mono text-[10px] text-faint">{i.affinity?.toFixed(2) ?? ""}</span>
+            {i.category ? <span className="shrink-0 text-[10px] text-turf">{i.category}</span> : <span className="font-mono text-[10px] text-faint">{i.affinity?.toFixed(2) ?? ""}</span>}
           </li>
         ))}
         {!items.length && <li className="text-xs text-faint">—</li>}

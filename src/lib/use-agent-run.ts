@@ -25,7 +25,8 @@ export interface TimelineTool {
 
 export type TimelineItem =
   | { id: string; kind: "thought" | "message"; text: string; at: number }
-  | { id: string; kind: "tool"; tool: TimelineTool; at: number };
+  | { id: string; kind: "tool"; tool: TimelineTool; at: number }
+  | { id: string; kind: "llm"; step: number; status: "started" | "finished"; ms?: number; outputTokens?: number; at: number };
 
 export interface RunState {
   status: "idle" | "running" | "done" | "error";
@@ -103,6 +104,18 @@ function reducer(state: RunState, action: Action): RunState {
     case "thought":
     case "message":
       return { ...next, timeline: [...next.timeline, { id: `${event.type}-${next.timeline.length}`, kind: event.type, text: event.text, at: now }] };
+    case "llm_step": {
+      const id = `llm-${event.step}`;
+      if (event.status === "started") {
+        return { ...next, timeline: [...next.timeline, { id, kind: "llm", step: event.step, status: "started", at: now }] };
+      }
+      return {
+        ...next,
+        timeline: next.timeline.map((item) =>
+          item.id === id && item.kind === "llm" ? { ...item, status: "finished", ms: event.ms, outputTokens: event.outputTokens } : item,
+        ),
+      };
+    }
     case "tool_call":
       return {
         ...next,

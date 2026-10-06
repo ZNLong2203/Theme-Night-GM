@@ -59,7 +59,7 @@ export function DemographicsBars({ demographics, className }: { demographics?: D
 }
 
 export function TrendSpark({ trend, width = 220, height = 48 }: { trend?: TrendSeries; width?: number; height?: number }) {
-  if (!trend || trend.points.length < 2) return <p className="text-xs text-faint">No trend data.</p>;
+  if (!trend || trend.points.length < 2) return <p className="text-xs text-faint">Not tracked in Qloo&apos;s trending data.</p>;
   const values = trend.points.map((p) => p.percentile);
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -80,7 +80,7 @@ export function TrendSpark({ trend, width = 220, height = 48 }: { trend?: TrendS
         <path d={`${line} L${width},${height} L0,${height} Z`} fill={`url(#g-${trend.direction})`} />
         <path d={line} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
       </svg>
-      <div className="mt-1 flex justify-between font-mono text-[10px] text-faint">
+      <div className="mt-1 flex justify-between font-mono text-[10px] text-faint" title="Qloo trending population percentile, weekly">
         <span>{trend.points[0].date}</span>
         <span style={{ color }}>
           {trend.direction} {trend.changePct > 0 ? "+" : ""}

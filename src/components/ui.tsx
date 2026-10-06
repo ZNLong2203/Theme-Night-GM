@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { clsx, type ClassValue } from "clsx";
 import {
   BookOpen,
@@ -117,7 +118,8 @@ export function ScoreRing({ value, size = 56, stroke = 5 }: { value: number; siz
 export function EntityAvatar({ entity, size = 40, className }: { entity: Pick<EntityCard, "name" | "kind" | "image">; size?: number; className?: string }) {
   const meta = KIND_META[entity.kind] ?? KIND_META.brand;
   const Icon = meta.icon;
-  if (entity.image) {
+  const [failed, setFailed] = useState<string>();
+  if (entity.image && failed !== entity.image) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -126,6 +128,8 @@ export function EntityAvatar({ entity, size = 40, className }: { entity: Pick<En
         width={size}
         height={size}
         loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(entity.image)}
         className={cn("shrink-0 rounded-lg border border-line object-cover", className)}
         style={{ width: size, height: size }}
       />

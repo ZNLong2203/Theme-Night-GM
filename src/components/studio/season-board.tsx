@@ -239,7 +239,7 @@ export function NightDetail({ night, plan, onClose }: { night: Night; plan: Seas
                     <DemographicsBars demographics={profile?.demographics} />
                   </div>
                   <div>
-                    <div className="mb-1 text-xs font-semibold text-muted">16-week momentum</div>
+                    <div className="mb-1 text-xs font-semibold text-muted">Momentum (Qloo trending)</div>
                     <TrendSpark trend={profile?.trend} />
                   </div>
                 </div>
@@ -272,7 +272,10 @@ export function NightDetail({ night, plan, onClose }: { night: Night; plan: Seas
                       <div className="flex items-center gap-2">
                         <EntityAvatar entity={s.brand} size={30} />
                         <div className="min-w-0 flex-1">
-                          <div className="text-sm font-semibold">{s.brand.name}</div>
+                          <div className="flex flex-wrap items-center gap-1.5 text-sm font-semibold">
+                            {s.brand.name}
+                            {s.brand.category && <Badge tone="turf">{s.brand.category}</Badge>}
+                          </div>
                           <div className="truncate text-[11px] text-faint">{s.brand.industries?.join(" · ")}</div>
                         </div>
                         <CopyButton text={pitch(s)} label="Pitch" />
