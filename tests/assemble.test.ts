@@ -19,6 +19,8 @@ const CHEERWINE: EntityCard = { id: "B-CHEER", name: "Cheerwine", kind: "brand",
 const SODAS: EntityCard[] = ["Sun Drop", "Pepsi", "Dr Pepper"].map((name, i) => ({ id: `B-SODA${i}`, name, kind: "brand", industries: ["Soft Drinks"] }));
 const PLACE: EntityCard = { id: "P-MOTORCO", name: "Motorco Music Hall", kind: "place" };
 const PODCAST: EntityCard = { id: "POD-PMT", name: "Pardon My Take", kind: "podcast" };
+const TAPROOM: EntityCard = { id: "P-TAPROOM", name: "Bull City Taproom", kind: "place", tags: ["Brewery"] };
+const CRIME_POD: EntityCard = { id: "POD-CRIME", name: "Crime Junkie", kind: "podcast" };
 
 const TARGETS: GameDate[] = [
   { date: "2027-04-06", weekday: "Tue", time: "night", target: true, segment: "families" },
@@ -27,7 +29,7 @@ const TARGETS: GameDate[] = [
 
 function makeRun(): RunContext {
   const taste = new TasteContext(new QlooRecorder(), VENUE.city, VENUE, "baseball");
-  taste.remember([SANDLOT, MOANA, ELECTION, ARTIST, STONE, CHEERWINE, ...SODAS, PLACE, PODCAST]);
+  taste.remember([SANDLOT, MOANA, ELECTION, ARTIST, STONE, CHEERWINE, ...SODAS, PLACE, PODCAST, TAPROOM, CRIME_POD]);
 
   taste.localPct.set(SANDLOT.id, 0.9);
   taste.segmentFit.set(SANDLOT.id, { families: 0.8, boomers: 0.6 });
@@ -185,7 +187,7 @@ describe("assemblePlan", () => {
     const { plan, warnings } = assemblePlan(run, submit(night({ sponsor_picks: sponsors }), second({ sponsor_picks: sponsors })));
 
     expect(plan).toBeDefined();
-    expect(warnings).toEqual(["Removed alcohol sponsor Stone Brewing Company from the families night on 2027-04-06"]);
+    expect(warnings).toEqual(["Removed sponsor Stone Brewing Company from the families night on 2027-04-06: it is an alcohol brand"]);
     expect(plan!.nights[0].sponsors.map((s) => s.brand.id)).toEqual([CHEERWINE.id]);
     expect(plan!.nights[1].sponsors.map((s) => s.brand.id)).toEqual([STONE.id, CHEERWINE.id]);
     // Removed sponsors don't contribute evidence.
@@ -194,7 +196,27 @@ describe("assemblePlan", () => {
     const genZ = makeRun();
     genZ.targets[1].segment = "gen_z";
     const result = assemblePlan(genZ, submit(night(), second({ sponsor_picks: sponsors })));
-    expect(result.warnings).toEqual(["Removed alcohol sponsor Stone Brewing Company from the gen_z night on 2027-04-21"]);
+    expect(result.warnings).toEqual(["Removed sponsor Stone Brewing Company from the gen_z night on 2027-04-21: it is an alcohol brand"]);
+  });
+
+  it("drops bars as partners on young-crowd nights and sensitive podcasts on any night", () => {
+    const partners = { local_partner_picks: [{ place_id: TAPROOM.id, idea: "Pre-game" }, { place_id: PLACE.id, idea: "Screening" }] };
+    const media = { media_partner: { podcast_id: CRIME_POD.id, idea: "Ad read" } };
+    const { plan, warnings } = assemblePlan(makeRun(), submit(night({ ...partners, ...media }), second(partners)));
+    expect(plan!.nights[0].localPartners.map((p) => p.place.id)).toEqual([PLACE.id]);
+    expect(plan!.nights[0].mediaPartner).toBeUndefined();
+    // Adults' night keeps the taproom.
+    expect(plan!.nights[1].localPartners.map((p) => p.place.id)).toEqual([TAPROOM.id, PLACE.id]);
+    expect(warnings).toEqual([
+      "Removed local partner Bull City Taproom from the families night on 2027-04-06: it is a bar or brewery",
+      'Removed media partner Crime Junkie from the families night on 2027-04-06: it touches a sensitive topic ("crime")',
+    ]);
+  });
+
+  it("rejects brands, places and podcasts as anchors", () => {
+    const { plan, errors } = assemblePlan(makeRun(), submit(night({ anchor_entity_id: CHEERWINE.id }), second()));
+    expect(plan).toBeUndefined();
+    expect(errors[0]).toContain("Cheerwine on 2027-04-06 is a brand");
   });
 
   it("caps sponsors at three per night", () => {

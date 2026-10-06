@@ -30,6 +30,16 @@ export function isAlcoholBrand(card: Pick<EntityCard, "name" | "industries" | "c
   return ALCOHOL.test(text.replace(/non[-\s]?alcoholic/gi, ""));
 }
 
+/** Bars, breweries and taprooms make poor pre-game partners for nights that include minors. */
+const DRINKING_SPOT = /\b(bars?|pubs?|tavern|saloon|taproom|tap house|brew\w*|beer\w*|winery|wine bar|cocktail\w*|distiller\w*|speakeasy|nightclub)\b/i;
+
+export function isDrinkingSpot(card: Pick<EntityCard, "name" | "tags">): boolean {
+  return DRINKING_SPOT.test([card.name, ...(card.tags ?? [])].join(" "));
+}
+
+/** Young crowds: nights aimed at families or under-25s, which include minors. */
+export const isYoungCrowd = (segment: string) => segment === "families" || segment === "gen_z";
+
 /**
  * Identity-based nights (pride, heritage, faith...) are community partnerships a club builds with
  * those communities — not something a taste model should infer from what an audience watches.

@@ -2,8 +2,8 @@ import "server-only";
 import { z } from "zod";
 import { licensingFor } from "@/lib/licensing";
 import { computeScore } from "@/lib/scoring";
-import { identityTheme, isAlcoholBrand, sensitiveTopic } from "@/lib/sensitivity";
-import type { EntityCard, Night, SeasonPlan } from "@/lib/types";
+import { identityTheme, isAlcoholBrand, isDrinkingSpot, isYoungCrowd, sensitiveTopic } from "@/lib/sensitivity";
+import type { EntityCard, EntityKind, Night, SeasonPlan } from "@/lib/types";
 import type { RunContext } from "./tools";
 
 export const PlanSubmission = z.object({
@@ -29,6 +29,9 @@ export const PlanSubmission = z.object({
     .min(1),
 });
 export type PlanSubmissionT = z.infer<typeof PlanSubmission>;
+
+/** A night is themed on a fandom; brands, places and podcasts are its partners, never its anchor. */
+const ANCHOR_KINDS = new Set<EntityKind>(["movie", "tv_show", "artist", "videogame", "book"]);
 
 /**
  * Turn the model's submission into a SeasonPlan. Entities are looked up from what Qloo actually
@@ -69,6 +72,10 @@ export function assemblePlan(
       errors.push(`anchor_entity_id "${n.anchor_entity_id}" on ${n.date} was not returned by any Qloo tool call`);
       continue;
     }
+    if (!ANCHOR_KINDS.has(anchor.kind)) {
+      errors.push(`${anchor.name} on ${n.date} is a ${anchor.kind}; anchor each night on a movie, TV show, artist, video game or book`);
+      continue;
+    }
     const topic = sensitiveTopic(anchor);
     if (topic) {
       errors.push(`${anchor.name} on ${n.date} touches a sensitive topic ("${topic}") — pick a different anchor`);
@@ -89,22 +96,34 @@ export function assemblePlan(
         return card ? [{ ref: r, card }] : [];
       });
 
-    const supporting = pick(n.supporting_entity_ids, (r) => r, "supporting entity").map((x) => x.card);
-    const youngCrowd = target.segment === "families" || target.segment === "gen_z";
+    const youngCrowd = isYoungCrowd(target.segment);
+    // Policy filters drop the offending partner with a warning instead of rejecting the whole plan.
+    const allowed = (card: EntityCard, label: string) => {
+      const topic = sensitiveTopic(card);
+      const reason = topic
+        ? `touches a sensitive topic ("${topic}")`
+        : youngCrowd && card.kind === "place" && isDrinkingSpot(card)
+          ? "is a bar or brewery"
+          : youngCrowd && isAlcoholBrand(card)
+            ? "is an alcohol brand"
+            : undefined;
+      if (reason) warnings.push(`Removed ${label} ${card.name} from the ${target.segment} night on ${n.date}: it ${reason}`);
+      return !reason;
+    };
+    const supporting = pick(n.supporting_entity_ids, (r) => r, "supporting entity")
+      .map((x) => x.card)
+      .filter((c) => allowed(c, "supporting entity"));
     const sponsors = pick(n.sponsor_picks, (r) => r.brand_id, "sponsor")
-      .filter((x) => {
-        if (youngCrowd && isAlcoholBrand(x.card)) {
-          warnings.push(`Removed alcohol sponsor ${x.card.name} from the ${target.segment} night on ${n.date}`);
-          return false;
-        }
-        return true;
-      })
+      .filter((x) => allowed(x.card, "sponsor"))
       .slice(0, 3)
       .map((x) => ({ brand: x.card, angle: x.ref.angle }));
     const playlist = pick(n.playlist_artist_ids, (r) => r, "artist").map((x) => x.card);
-    const localPartners = pick(n.local_partner_picks, (r) => r.place_id, "place").map((x) => ({ place: x.card, idea: x.ref.idea }));
-    const media = n.media_partner ? lookup(n.media_partner.podcast_id) : undefined;
-    if (n.media_partner && !media) warnings.push(`Dropped unknown podcast on ${n.date}`);
+    const localPartners = pick(n.local_partner_picks, (r) => r.place_id, "place")
+      .filter((x) => allowed(x.card, "local partner"))
+      .map((x) => ({ place: x.card, idea: x.ref.idea }));
+    const podcast = n.media_partner ? lookup(n.media_partner.podcast_id) : undefined;
+    if (n.media_partner && !podcast) warnings.push(`Dropped unknown podcast on ${n.date}`);
+    const media = podcast && allowed(podcast, "media partner") ? podcast : undefined;
 
     const profile = taste.profiles.get(anchor.id);
     const score = computeScore({

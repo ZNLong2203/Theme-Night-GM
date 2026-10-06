@@ -35,6 +35,7 @@ describe("runAgent in simulated mode (no keys)", () => {
   let isAlcoholBrand: typeof import("@/lib/sensitivity").isAlcoholBrand;
   let sensitiveTopic: typeof import("@/lib/sensitivity").sensitiveTopic;
   let identityTheme: typeof import("@/lib/sensitivity").identityTheme;
+  let isDrinkingSpot: typeof import("@/lib/sensitivity").isDrinkingSpot;
 
   const ofType = <T extends AgentEvent["type"]>(type: T) => events.filter((e): e is Of<T> => e.type === type);
 
@@ -44,7 +45,7 @@ describe("runAgent in simulated mode (no keys)", () => {
     delete process.env.GEMINI_API_KEY;
     const { runAgent } = await import("@/lib/agent/run");
     const { PRESETS, teamFromPreset } = await import("@/lib/presets");
-    ({ isAlcoholBrand, sensitiveTopic, identityTheme } = await import("@/lib/sensitivity"));
+    ({ isAlcoholBrand, sensitiveTopic, identityTheme, isDrinkingSpot } = await import("@/lib/sensitivity"));
 
     team = teamFromPreset(PRESETS[0], 4);
     await runAgent(team, (event) => events.push(event));
@@ -122,7 +123,26 @@ describe("runAgent in simulated mode (no keys)", () => {
       expect(identityTheme(night.title, night.tagline)).toBeUndefined();
       if (night.segment === "families" || night.segment === "gen_z") {
         expect(night.sponsors.filter((s) => isAlcoholBrand(s.brand))).toEqual([]);
+        expect(night.localPartners.filter((p) => isDrinkingSpot(p.place))).toEqual([]);
       }
+      if (night.mediaPartner) expect(sensitiveTopic(night.mediaPartner.podcast)).toBeUndefined();
     }
+  });
+
+  it("keeps franchise titles out of customer-facing copy under ip_light", () => {
+    const plan = ofType("plan")[0].plan;
+    expect(plan.team.ipPolicy).toBe("ip_light");
+    for (const night of plan.nights.filter((n) => n.anchor.kind !== "artist")) {
+      expect(night.title).not.toContain(night.anchor.name);
+      expect(night.promo.social).not.toContain(night.anchor.name);
+    }
+    expect(new Set(plan.nights.map((n) => n.title)).size).toBe(plan.nights.length);
+  });
+
+  it("pitches sponsors from the team's own sales categories", () => {
+    const plan = ofType("plan")[0].plan;
+    const sponsors = plan.nights.flatMap((n) => n.sponsors);
+    expect(sponsors.length).toBeGreaterThan(0);
+    for (const s of sponsors) expect(team.sponsorCategories).toContain(s.brand.category);
   });
 });
