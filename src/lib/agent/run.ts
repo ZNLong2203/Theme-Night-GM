@@ -1,8 +1,10 @@
 import "server-only";
 import { FinishReason, GoogleGenAI, ThinkingLevel, type Content, type Part } from "@google/genai";
+import { PRESETS } from "@/lib/presets";
 import { QlooRecorder, qlooIsLive } from "@/lib/qloo/client";
+import { DAY, kvSet, storeKind } from "@/lib/store";
 import { TasteContext } from "@/lib/qloo/workflows";
-import type { AgentEvent, RunMode, TeamConfig } from "@/lib/types";
+import type { AgentEvent, RunMode, SeasonPlan, TeamConfig } from "@/lib/types";
 import { runAutopilot } from "./autopilot";
 import { buildBrief, SYSTEM_PROMPT } from "./prompt";
 import { FUNCTION_DECLARATIONS, runTool, type RunContext } from "./tools";
@@ -19,19 +21,32 @@ export function runMode(): RunMode {
     qloo: qlooIsLive() ? "live" : "simulated",
     llm: process.env.GEMINI_API_KEY ? "gemini" : "autopilot",
     model: process.env.GEMINI_API_KEY ? GEMINI_MODEL : undefined,
+    store: storeKind(),
   };
 }
 
-export async function runAgent(team: TeamConfig, emit: (event: AgentEvent) => void, signal?: AbortSignal) {
+const KEEP_FOR = 90 * DAY;
+/** Run logs bigger than this aren't stored for replay (the plan itself still is). */
+const MAX_RUN_LOG_BYTES = 3_000_000;
+
+export async function runAgent(team: TeamConfig, send: (event: AgentEvent) => void, signal?: AbortSignal) {
   const started = Date.now();
+  const runId = crypto.randomUUID();
+  const log: AgentEvent[] = [];
+  let plan: SeasonPlan | undefined;
+  const emit = (event: AgentEvent) => {
+    log.push(event);
+    if (event.type === "plan") plan = event.plan;
+    send(event);
+  };
   const recorder = new QlooRecorder((request) => emit({ type: "qloo_request", request }));
   const taste = new TasteContext(recorder, team.venue.city, team.venue, team.sport);
   const targets = team.dates.filter((d) => d.target).sort((a, b) => a.date.localeCompare(b.date));
   const mode = runMode();
-  const run: RunContext = { taste, team, targets, mode, emit, kits: new Map() };
+  const run: RunContext = { id: runId, taste, team, targets, mode, emit, kits: new Map() };
   let llmSteps = 0;
 
-  emit({ type: "run_started", runId: crypto.randomUUID(), mode, at: new Date().toISOString() });
+  emit({ type: "run_started", runId, mode, at: new Date().toISOString() });
 
   if (!targets.length) {
     emit({ type: "error", message: "Pick at least one target date." });
@@ -55,6 +70,18 @@ export async function runAgent(team: TeamConfig, emit: (event: AgentEvent) => vo
   }
 
   emit({ type: "done", elapsedMs: Date.now() - started, qlooCalls: recorder.logs.length, llmSteps });
+  if (plan) await persistRun(plan, log);
+}
+
+/** Save the plan (shareable at /plan/<id>) and the event log (replayable in the studio). */
+async function persistRun(plan: SeasonPlan, log: AgentEvent[]) {
+  const saves: Promise<unknown>[] = [kvSet(`plan:${plan.id}`, plan, KEEP_FOR)];
+  if (JSON.stringify(log).length <= MAX_RUN_LOG_BYTES) saves.push(kvSet(`run:${plan.id}`, log, KEEP_FOR));
+  const preset = PRESETS.find((p) => p.teamName === plan.team.teamName && p.venue.city === plan.team.venue.city);
+  if (preset && plan.mode.qloo === "live") {
+    saves.push(kvSet(`featured:${preset.slug}`, { id: plan.id, at: plan.createdAt, team: plan.team.teamName }, KEEP_FOR));
+  }
+  await Promise.all(saves);
 }
 
 async function geminiLoop(run: RunContext, started: number, signal?: AbortSignal): Promise<number> {

@@ -18,6 +18,8 @@ import type { AgentEvent, EntityCard, EntityKind, GameDate, RunMode, SegmentId, 
 import { assemblePlan, PlanSubmission, type PlanSubmissionT } from "./assemble";
 
 export interface RunContext {
+  /** Shared by the run log and the plan, so /plan/<id> and the replay line up. */
+  id: string;
   taste: TasteContext;
   team: TeamConfig;
   targets: GameDate[];

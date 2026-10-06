@@ -6,6 +6,7 @@ import {
   Copy,
   Download,
   Gift,
+  Link2,
   Megaphone,
   MapPin,
   Mic,
@@ -41,6 +42,7 @@ export function SeasonBoard({ plan }: { plan: SeasonPlan }) {
             <p className="mt-2 text-sm leading-relaxed text-muted">{plan.marketSummary}</p>
           </div>
           <div className="no-print flex flex-wrap gap-2">
+            <ShareButton plan={plan} />
             <Button variant="outline" size="sm" onClick={() => downloadJson(plan)}>
               <Download size={14} /> JSON
             </Button>
@@ -67,6 +69,24 @@ export function SeasonBoard({ plan }: { plan: SeasonPlan }) {
 
       {open && <NightDetail night={open} plan={plan} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+function ShareButton({ plan }: { plan: SeasonPlan }) {
+  const [copied, setCopied] = useState(false);
+  const temporary = plan.mode.store !== "redis";
+  return (
+    <Button
+      size="sm"
+      title={temporary ? "No Redis attached: the link lasts only while this server instance is warm" : "Anyone with the link can view this plan"}
+      onClick={() => {
+        navigator.clipboard.writeText(`${window.location.origin}/plan/${plan.id}`);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1600);
+      }}
+    >
+      {copied ? <Check size={14} /> : <Link2 size={14} />} {copied ? "Link copied" : temporary ? "Share (temporary)" : "Share link"}
+    </Button>
   );
 }
 

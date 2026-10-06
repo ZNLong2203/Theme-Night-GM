@@ -158,7 +158,7 @@ export function assemblePlan(
 
   return {
     plan: {
-      id: crypto.randomUUID(),
+      id: run.id,
       createdAt: new Date().toISOString(),
       team,
       marketSummary: submission.market_summary,

@@ -1,7 +1,13 @@
 import "server-only";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash } from "node:crypto";
+import { kvGet, kvSet, storeKind } from "@/lib/store";
 import type { QlooRequestLog } from "@/lib/types";
 import { mockQloo } from "./mock";
+
+/** Shared cache across instances (Redis) for live responses; the kit asks us to cache only what we need. */
+const SHARED_CACHE_TTL_S = 24 * 60 * 60;
+const sharedKey = (key: string) => `qloo:v1:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
 
 const BASE_URL = process.env.QLOO_BASE_URL ?? "https://hackathon.api.qloo.com";
 const TIMEOUT_MS = 20_000;
@@ -112,7 +118,14 @@ export async function qlooGet<T = unknown>(
   const started = Date.now();
   const live = qlooIsLive();
 
-  const hit = cache.get(key);
+  let hit = cache.get(key);
+  if (!(hit && Date.now() - hit.at < CACHE_TTL_MS) && live && storeKind() === "redis") {
+    const shared = await kvGet<unknown>(sharedKey(key));
+    if (shared !== null) {
+      hit = { at: Date.now(), body: shared };
+      cache.set(key, hit);
+    }
+  }
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
     recorder.push({
       id: requestId,
@@ -149,6 +162,7 @@ export async function qlooGet<T = unknown>(
   }
 
   cache.set(key, { at: Date.now(), body });
+  if (live && storeKind() === "redis") void kvSet(sharedKey(key), body, SHARED_CACHE_TTL_S);
   if (cache.size > 2000) cache.delete(cache.keys().next().value as string);
   recorder.push({
     id: requestId,

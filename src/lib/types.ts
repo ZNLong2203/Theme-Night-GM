@@ -181,6 +181,8 @@ export interface RunMode {
   qloo: "live" | "simulated";
   llm: "gemini" | "autopilot";
   model?: string;
+  /** Where plans and run logs are kept: Redis (shareable links) or this server's memory. */
+  store?: "redis" | "memory";
 }
 
 export interface MarketScan {

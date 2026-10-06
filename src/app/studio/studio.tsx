@@ -23,14 +23,26 @@ export function Studio() {
   const [now, setNow] = useState(() => Date.now());
   const booted = useRef(false);
 
-  // ?autorun=1 starts a live run; ?replay=1 plays back a recorded run for an instant demo.
+  // ?autorun=1 starts a live run. ?replay=<run id> (or ?replay=1&preset=<slug> for the latest featured
+  // run) plays back a recorded live run instantly — no waiting, no extra API spend.
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
-    if (params.get("replay")) {
-      fetch(`/demo-runs/${preset.slug}.json`)
-        .then((r) => (r.ok ? r.json() : Promise.reject()))
-        .then((events: AgentEvent[]) => replay(events, 1.5))
+    const replayParam = params.get("replay");
+    if (replayParam) {
+      const runId: Promise<string | undefined> = /^[0-9a-f-]{36}$/.test(replayParam)
+        ? Promise.resolve(replayParam)
+        : fetch("/api/featured")
+            .then((r) => r.json())
+            .then((rows: { slug: string; id: string }[]) => rows.find((row) => row.slug === preset.slug)?.id);
+      runId
+        .then((id) => (id ? fetch(`/api/runs/${id}`) : Promise.reject(new Error("no recorded run"))))
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error("run expired"))))
+        .then((events: AgentEvent[]) => {
+          const planEvent = events.find((e) => e.type === "plan");
+          if (planEvent?.type === "plan") setTeam(planEvent.plan.team);
+          replay(events, 2);
+        })
         .catch(() => start(team));
     } else if (params.get("autorun")) {
       start(team);

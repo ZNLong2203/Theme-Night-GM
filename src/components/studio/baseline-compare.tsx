@@ -20,7 +20,7 @@ export function BaselineCompare({ plan }: { plan: SeasonPlan }) {
     setLoading(true);
     setError(undefined);
     try {
-      const res = await fetch("/api/baseline", {
+      const res = await fetch(`/api/baseline?planId=${plan.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(plan.team),

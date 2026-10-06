@@ -2,6 +2,7 @@ import { ArrowRight, Check, CircleSlash, Database, Lock, MapPinned, Play, Receip
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { REPO_URL } from "@/lib/config";
+import { featuredPlans } from "@/lib/featured";
 import { SCORE_LABELS, SCORE_WEIGHTS } from "@/lib/scoring";
 
 const STEPS = [
@@ -37,7 +38,9 @@ const STEPS = [
   },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const featured = await featuredPlans();
+  const durham = featured.find((f) => f.slug === "durham-baseball");
   return (
     <>
       <SiteHeader />
@@ -62,7 +65,7 @@ export default function Home() {
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Link
-                  href="/studio?preset=durham-baseball&autorun=1"
+                  href={durham ? `/studio?replay=${durham.id}` : "/studio?preset=durham-baseball&autorun=1"}
                   className="inline-flex h-12 items-center gap-2 rounded-lg bg-amber px-6 font-semibold text-amber-ink hover:bg-[#ffc56e]"
                 >
                   <Play size={18} /> Watch it plan Durham
@@ -74,7 +77,20 @@ export default function Home() {
                   Brief it on your team <ArrowRight size={18} />
                 </Link>
               </div>
-              <p className="mt-4 text-xs text-faint">No sign-up. Runs live against the Qloo API; a full season plan takes about a minute.</p>
+              <p className="mt-4 text-xs text-faint">
+                No sign-up.{" "}
+                {durham ? (
+                  <>
+                    Replays a recorded live run instantly, or{" "}
+                    <Link href="/studio?preset=durham-baseball&autorun=1" className="underline hover:text-text">
+                      run it live
+                    </Link>{" "}
+                    (about two minutes).
+                  </>
+                ) : (
+                  "Runs live against the Qloo API; a full season plan takes about two minutes."
+                )}
+              </p>
             </div>
 
             <div className="relative">
@@ -126,6 +142,28 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        {featured.length > 0 && (
+          <section className="mx-auto max-w-7xl px-4 pt-12">
+            <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.18em] text-amber">Finished plans from live runs</div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {featured.map((f) => (
+                <div key={f.slug} className="rounded-xl border border-line bg-surface p-4">
+                  <div className="font-display text-lg font-bold uppercase">{f.city}</div>
+                  <div className="text-xs text-muted">{f.team}</div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+                    <Link href={`/plan/${f.id}`} className="rounded-md bg-amber px-2.5 py-1 text-amber-ink hover:bg-[#ffc56e]">
+                      Open plan
+                    </Link>
+                    <Link href={`/studio?replay=${f.id}`} className="rounded-md border border-line-strong px-2.5 py-1 hover:border-amber/60 hover:text-amber">
+                      Replay the run
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Problem */}
         <section className="mx-auto max-w-7xl px-4 py-16">
@@ -182,7 +220,7 @@ export default function Home() {
           <div className="mx-auto max-w-7xl px-4 py-16">
             <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-amber">How the agent works</div>
             <h2 className="max-w-3xl font-display text-3xl font-bold uppercase tracking-wide md:text-4xl">
-              Eight tools, about 60–90 Qloo requests, one season plan.
+              Eight tools, about 90–110 Qloo requests, one season plan.
             </h2>
             <p className="mt-3 max-w-3xl text-muted">
               A Gemini 3.8 Flash agent plans and calls tools. Each tool is a Qloo workflow that bundles the requests needed to answer one question
