@@ -86,7 +86,7 @@ const scanMarketTool: ToolDef<{ kinds: (typeof SCAN_KINDS)[number][]; min_popula
   declaration: {
     name: "scan_market_taste",
     description:
-      "Read the room: for the team's city, ask Qloo which fandoms (movies, TV, artists, video games, books) the local audience has the strongest affinity for. Returns the city's top 25 per domain with local_rank, local_pct (rank percentile, 1 = the city's #1) and local_lift = how many places higher it ranks locally than by national popularity (positive = the city over-indexes). Call this first.",
+      "Read the room: for the team's city, ask Qloo which fandoms (movies, TV, artists, video games, books) the local audience has the strongest affinity for. Returns the city's top 10 per domain (ranked inside its top 25) with local_rank, local_pct (rank percentile, 1 = the city's #1) and local_lift = how many places higher it ranks locally than by national popularity (positive = the city over-indexes). Call this first.",
     parametersJsonSchema: {
       type: "object",
       properties: {
