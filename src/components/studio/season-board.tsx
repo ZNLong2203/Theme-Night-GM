@@ -23,7 +23,7 @@ import { formatDate, SEGMENTS } from "@/lib/schedule";
 import type { Night, SeasonPlan } from "@/lib/types";
 import { HeatMap } from "../heat-map";
 import { Badge, Button, Card, cn, EntityAvatar, KindBadge, ScoreRing } from "../ui";
-import { DemographicsBars, ScoreBars, TrendSpark } from "../viz";
+import { DemographicsBars, ScoreBars, TrendSpark, trendFailure } from "../viz";
 import { AskTheGm } from "./ask-gm";
 import { BaselineCompare } from "./baseline-compare";
 import { Receipts } from "./receipts";
@@ -273,7 +273,7 @@ export function NightDetail({ night, plan, onClose }: { night: Night; plan: Seas
                   </div>
                   <div>
                     <div className="mb-1 text-xs font-semibold text-muted">Momentum (Qloo trending)</div>
-                    <TrendSpark trend={profile?.trend} />
+                    <TrendSpark trend={profile?.trend} failed={trendFailure(profile)} />
                   </div>
                 </div>
               </Panel>

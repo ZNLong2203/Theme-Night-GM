@@ -46,9 +46,11 @@ export function BaselineCompare({ plan, onPlanChange }: { plan: SeasonPlan; onPl
 
   const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0);
   const gmAvg = avg(plan.nights.map((n) => n.score.total));
-  const baseScores = result?.nights.map((n) => n.score?.total ?? 0) ?? [];
+  // A pick Qloo can't find scores 0; a pick whose lookup failed says nothing either way, so it's left out.
+  const baseScores = result?.nights.filter((n) => !n.lookupFailed).map((n) => n.score?.total ?? 0) ?? [];
   const baseAvg = avg(baseScores);
-  const notFound = result?.nights.filter((n) => !n.found).length ?? 0;
+  const notFound = result?.nights.filter((n) => !n.found && !n.lookupFailed).length ?? 0;
+  const lookupFailed = result?.nights.filter((n) => n.lookupFailed).length ?? 0;
 
   return (
     <Card className="mt-5 p-5">
@@ -90,6 +92,7 @@ export function BaselineCompare({ plan, onPlanChange }: { plan: SeasonPlan; onPl
                 {gmAvg - baseAvg} pts
               </div>
               {notFound > 0 && <div className="text-[11px] text-faint">{notFound} LLM pick(s) not found in Qloo&apos;s graph (scored 0)</div>}
+              {lookupFailed > 0 && <div className="text-[11px] text-faint">{lookupFailed} pick(s) left out: the Qloo lookup failed</div>}
             </div>
           </div>
 
@@ -122,7 +125,7 @@ export function BaselineCompare({ plan, onPlanChange }: { plan: SeasonPlan; onPl
                             <div className="font-semibold text-muted">{b?.title}</div>
                             <div className="text-xs text-faint">
                               anchor: {b?.anchorName}
-                              {b && !b.found && <Badge className="ml-1">not in Qloo</Badge>}
+                              {b && !b.found && <Badge className="ml-1">{b.lookupFailed ? "lookup failed" : "not in Qloo"}</Badge>}
                             </div>
                             {b?.score && (
                               <div className="mt-1 font-mono text-[10px] text-faint">

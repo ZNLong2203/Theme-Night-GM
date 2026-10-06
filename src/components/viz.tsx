@@ -1,7 +1,7 @@
 "use client";
 
 import { SCORE_LABELS, SCORE_WEIGHTS } from "@/lib/scoring";
-import type { AgeBucket, Demographics, ScoreBreakdown, TrendSeries } from "@/lib/types";
+import type { AgeBucket, Demographics, EntityProfile, ScoreBreakdown, TrendSeries } from "@/lib/types";
 import { cn, Meter } from "./ui";
 
 const AGE_LABELS: Record<AgeBucket, string> = {
@@ -58,7 +58,11 @@ export function DemographicsBars({ demographics, className }: { demographics?: D
   );
 }
 
-export function TrendSpark({ trend, width = 220, height = 48 }: { trend?: TrendSeries; width?: number; height?: number }) {
+/** "Qloo request failed (429)" when the profile's trend request failed, as opposed to Qloo having no data. */
+export const trendFailure = (profile?: EntityProfile) => profile?.unavailable?.find((u) => u.startsWith("Trend: "))?.slice("Trend: ".length);
+
+export function TrendSpark({ trend, failed, width = 220, height = 48 }: { trend?: TrendSeries; failed?: string; width?: number; height?: number }) {
+  if (failed) return <p className="text-xs text-rose">Trend unavailable: {failed}.</p>;
   if (!trend || trend.points.length < 2) return <p className="text-xs text-faint">Not tracked in Qloo&apos;s trending data.</p>;
   const values = trend.points.map((p) => p.percentile);
   const min = Math.min(...values);
@@ -108,6 +112,11 @@ export function ScoreBars({ score }: { score: ScoreBreakdown }) {
           <div className="mb-1 flex justify-between text-[11px]">
             <span className="text-muted">
               {SCORE_LABELS[key].label} <span className="text-faint">×{SCORE_WEIGHTS[key]}</span>
+              {score.estimated?.includes(key) && (
+                <span className="ml-1.5 rounded border border-line px-1 font-mono text-[9px] uppercase text-faint" title="Qloo couldn't measure this for the fandom, so it scores a neutral 0.5">
+                  est.
+                </span>
+              )}
             </span>
             <span className="font-mono text-text">{score[key].toFixed(2)}</span>
           </div>

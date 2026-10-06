@@ -7,7 +7,7 @@ import type { EntityProfile, SegmentId, Venue } from "@/lib/types";
 import type { RunState } from "@/lib/use-agent-run";
 import { HeatMap } from "../heat-map";
 import { Badge, Card, cn, EntityAvatar, KIND_META, KindBadge, Meter } from "../ui";
-import { DemographicsBars, TrendSpark } from "../viz";
+import { DemographicsBars, TrendSpark, trendFailure } from "../viz";
 import { Receipts } from "./receipts";
 
 type Tab = "market" | "fandoms" | "fit" | "kits" | "receipts";
@@ -182,7 +182,7 @@ export function FandomBoard({ profiles, venue }: { profiles: EntityProfile[]; ve
         <div className="space-y-3 rounded-lg border border-line bg-bg p-3">
           <div>
             <div className="mb-1 text-xs font-semibold text-muted">Qloo trending (16 weeks)</div>
-            <TrendSpark trend={active.trend} />
+            <TrendSpark trend={active.trend} failed={trendFailure(active)} />
           </div>
           {active.tasteTags?.length ? (
             <div>
