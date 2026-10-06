@@ -18,8 +18,10 @@ type Experience = { playlist_artists?: { id: string }[]; nearby_places?: { id: s
  */
 export async function runAutopilot(run: RunContext, opts: { reason?: string } = {}) {
   const { taste, targets, emit } = run;
+  // Unique per pass: the safety net can run after an earlier autopilot pass in the same run.
+  const pass = crypto.randomUUID().slice(0, 4);
   let seq = 0;
-  const call = (name: string, args: unknown) => runTool(name, args, `auto_${++seq}`, run);
+  const call = (name: string, args: unknown) => runTool(name, args, `auto_${pass}_${++seq}`, run);
   const think = (text: string) => emit({ type: "thought", text });
   const segments = [...new Set(targets.map((t) => t.segment))] as SegmentId[];
   const safe = (c: EntityCard) => !sensitiveTopic(c) && c.kind !== "brand" && c.kind !== "place";
