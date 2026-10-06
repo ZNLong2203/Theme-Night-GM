@@ -42,6 +42,8 @@ export interface RunState {
   lastUi?: ToolUIData["kind"];
   plan?: SeasonPlan;
   error?: string;
+  /** Ask the GM can just answer a question, so a run there may end without a plan. */
+  planOptional?: boolean;
   startedAt?: number;
   elapsedMs?: number;
   llmSteps?: number;
@@ -61,7 +63,7 @@ const initial: RunState = {
 };
 
 type Action =
-  | { type: "reset" }
+  | { type: "reset"; planOptional?: boolean }
   | { type: "event"; event: AgentEvent }
   | { type: "fail"; message: string }
   | { type: "stopped" }
@@ -114,7 +116,7 @@ function settle(timeline: TimelineItem[]): TimelineItem[] {
 }
 
 function reducer(state: RunState, action: Action): RunState {
-  if (action.type === "reset") return { ...initial, status: "running", startedAt: Date.now() };
+  if (action.type === "reset") return { ...initial, status: "running", startedAt: Date.now(), planOptional: action.planOptional };
   if (action.type === "fail") return { ...state, status: "error", error: action.message, timeline: settle(state.timeline) };
   if (action.type === "stopped") {
     if (state.status !== "running") return state;
@@ -182,11 +184,11 @@ function reducer(state: RunState, action: Action): RunState {
     case "done":
       return {
         ...next,
-        status: next.plan ? "done" : "error",
+        status: next.plan || (next.planOptional && !next.error) ? "done" : "error",
         timeline: settle(next.timeline),
         elapsedMs: event.elapsedMs,
         llmSteps: event.llmSteps,
-        error: next.plan ? next.error : (next.error ?? "The agent finished without a plan."),
+        error: next.plan || next.planOptional ? next.error : (next.error ?? "The agent finished without a plan."),
       };
     default:
       return next;
@@ -258,11 +260,11 @@ export function useAgentRun() {
   }, []);
 
   const stream = useCallback(
-    async (url: string, body: unknown, onPlan?: (plan: SeasonPlan) => void) => {
+    async (url: string, body: unknown, onPlan?: (plan: SeasonPlan) => void, planOptional = false) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      dispatch({ type: "reset" });
+      dispatch({ type: "reset", planOptional });
       let finished = false;
       try {
         const response = await fetch(url, {
@@ -310,7 +312,7 @@ export function useAgentRun() {
 
   /** "Ask the GM": stream a revision of an existing plan; `onPlan` receives the merged plan. */
   const revise = useCallback(
-    (plan: SeasonPlan, message: string, onPlan: (plan: SeasonPlan) => void) => stream("/api/revise", { plan, message }, onPlan),
+    (plan: SeasonPlan, message: string, onPlan: (plan: SeasonPlan) => void) => stream("/api/revise", { plan, message }, onPlan, true),
     [stream],
   );
 
