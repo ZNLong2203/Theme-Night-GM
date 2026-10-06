@@ -46,3 +46,6 @@ next-env.d.ts
 
 # agent worktrees (local only)
 /.claude/
+
+# personal submission kit: scripts, gallery, notes (never pushed or deployed)
+/private/
